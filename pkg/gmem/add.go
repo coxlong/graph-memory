@@ -100,3 +100,31 @@ func (c *Client) Add(in *AddInput) (*AddResult, error) {
 	}
 	return result, nil
 }
+
+type TripletResult struct {
+	SourceUUID string `json:"source_uuid"`
+	TargetUUID string `json:"target_uuid"`
+	EdgeUUID   string `json:"edge_uuid"`
+}
+
+// AddTriplet writes a single fact triplet (aligns with graphiti add_triplet):
+// entities deduped by name, edge created fresh.
+func (c *Client) AddTriplet(sourceName, edgeName, fact, targetName, groupID, validAt string, lenient bool) (*TripletResult, error) {
+	gid := c.GroupID(groupID)
+	src, _, err := c.UpsertEntity(&Entity{Name: sourceName, GroupID: gid}, lenient)
+	if err != nil {
+		return nil, fmt.Errorf("source entity: %w", err)
+	}
+	tgt, _, err := c.UpsertEntity(&Entity{Name: targetName, GroupID: gid}, lenient)
+	if err != nil {
+		return nil, fmt.Errorf("target entity: %w", err)
+	}
+	edge, err := c.UpsertEdge(&Edge{
+		Name: edgeName, Fact: fact, GroupID: gid,
+		SourceUUID: src.UUID, TargetUUID: tgt.UUID, ValidAt: validAt,
+	}, lenient)
+	if err != nil {
+		return nil, err
+	}
+	return &TripletResult{SourceUUID: src.UUID, TargetUUID: tgt.UUID, EdgeUUID: edge.UUID}, nil
+}

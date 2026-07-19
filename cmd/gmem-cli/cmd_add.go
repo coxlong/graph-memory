@@ -60,3 +60,39 @@ var addCmd = &cobra.Command{
 		printJSON(res)
 	},
 }
+
+var (
+	triSource, triName, triFact, triTarget, triGroup, triValidAt string
+	triLenient                                                   bool
+)
+
+func init() {
+	addTripletCmd.Flags().StringVar(&triSource, "source", "", "source entity name")
+	addTripletCmd.Flags().StringVar(&triName, "name", "", "relation name")
+	addTripletCmd.Flags().StringVar(&triFact, "fact", "", "natural language fact")
+	addTripletCmd.Flags().StringVar(&triTarget, "target", "", "target entity name")
+	addTripletCmd.Flags().StringVar(&triGroup, "group-id", "", "group id")
+	addTripletCmd.Flags().StringVar(&triValidAt, "valid-at", "", "RFC3339 time")
+	addTripletCmd.Flags().BoolVar(&triLenient, "lenient", false, "skip schema validation")
+	_ = addTripletCmd.MarkFlagRequired("source")
+	_ = addTripletCmd.MarkFlagRequired("name")
+	_ = addTripletCmd.MarkFlagRequired("fact")
+	_ = addTripletCmd.MarkFlagRequired("target")
+	rootCmd.AddCommand(addTripletCmd)
+}
+
+var addTripletCmd = &cobra.Command{
+	Use:   "add-triplet",
+	Short: "Add a single fact triplet (entities deduped by name)",
+	Run: func(cmd *cobra.Command, args []string) {
+		c, err := loadClient()
+		if err != nil {
+			fatal(err)
+		}
+		res, err := c.AddTriplet(triSource, triName, triFact, triTarget, triGroup, triValidAt, triLenient)
+		if err != nil {
+			fatal(err)
+		}
+		printJSON(res)
+	},
+}

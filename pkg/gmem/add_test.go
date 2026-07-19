@@ -64,3 +64,25 @@ func TestAddIdempotentRetry(t *testing.T) {
 		t.Fatalf("retry not idempotent: %v vs %v", r1.Entities, r2.Entities)
 	}
 }
+
+func TestAddTriplet(t *testing.T) {
+	srv := newFakeEmbedServer(t)
+	defer srv.Close()
+	c := newTestClient(t, srv.URL)
+
+	r, err := c.AddTriplet("TriAlice", "WORKS_ON", "TriAlice works on gmem", "gmem", "", "", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.SourceUUID == "" || r.TargetUUID == "" || r.EdgeUUID == "" {
+		t.Fatalf("bad result: %+v", r)
+	}
+	// repeat: entities dedup, edge uuid changes (new edge each call)
+	r2, err := c.AddTriplet("TriAlice", "WORKS_ON", "TriAlice works on gmem", "gmem", "", "", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.SourceUUID != r2.SourceUUID || r.TargetUUID != r2.TargetUUID {
+		t.Fatalf("entities should dedup: %+v vs %+v", r, r2)
+	}
+}
