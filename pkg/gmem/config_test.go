@@ -7,11 +7,12 @@ import (
 )
 
 func TestLoadConfigDefaults(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
 	cfg, err := LoadConfig("")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.FalkorAddr != "localhost:6379" || cfg.Graph != "gmem" || cfg.EmbedModel != "text-embedding-3-small" {
+	if cfg.FalkorAddr != "localhost:6379" || cfg.GroupID != "default" || cfg.EmbedModel != "text-embedding-3-small" {
 		t.Fatalf("bad defaults: %+v", cfg)
 	}
 }

@@ -7,15 +7,13 @@ import (
 )
 
 var (
-	communityGroup, communityName, communitySummary, communityMembers string
+	communityName, communitySummary, communityMembers string
 )
 
 func init() {
-	communityBuildCmd.Flags().StringVar(&communityGroup, "group-id", "", "group id")
 	communityUpsertCmd.Flags().StringVar(&communityName, "name", "", "community name")
 	communityUpsertCmd.Flags().StringVar(&communitySummary, "summary", "", "agent-written summary")
 	communityUpsertCmd.Flags().StringVar(&communityMembers, "member-uuids", "", "comma-separated entity uuids")
-	communityUpsertCmd.Flags().StringVar(&communityGroup, "group-id", "", "group id")
 	_ = communityUpsertCmd.MarkFlagRequired("name")
 	_ = communityUpsertCmd.MarkFlagRequired("summary")
 
@@ -33,7 +31,7 @@ var communityBuildCmd = &cobra.Command{
 		if err != nil {
 			fatal(err)
 		}
-		comms, err := c.BuildCommunities(communityGroup)
+		comms, err := c.BuildCommunities("")
 		if err != nil {
 			fatal(err)
 		}
@@ -58,7 +56,7 @@ var communityUpsertCmd = &cobra.Command{
 				}
 			}
 		}
-		com, err := c.UpsertCommunity(communityName, communitySummary, members, communityGroup)
+		com, err := c.UpsertCommunity(communityName, communitySummary, members, "")
 		if err != nil {
 			fatal(err)
 		}

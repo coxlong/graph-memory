@@ -1,0 +1,23 @@
+# Example gmem type schema. Set `schema_path` in ~/.gmem.yaml (or GMEM_SCHEMA env)
+# to point at this file. Connection settings (falkordb_addr, group_id, embedding_*)
+# belong in ~/.gmem.yaml, not here.
+# Without a schema, gmem-cli performs no type validation (free-form entities/edges).
+
+entity_types:
+  Person:
+    description: "A real person"
+    attributes:
+      role: { type: string, required: true }
+      team: { type: string }
+  Project:
+    attributes:
+      status: { type: "enum:active|paused|done", required: true }
+      repo: { type: string }
+
+edge_types:
+  WORKS_ON:
+    source: [Person]
+    target: [Project]
+  MEMBER_OF:
+    source: [Person]
+    target: [Project]

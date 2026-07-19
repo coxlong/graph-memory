@@ -28,10 +28,11 @@ func newTestClient(t *testing.T, embedURL string) *Client {
 		FalkorAddr:     addr,
 		FalkorUser:     os.Getenv("FALKORDB_TEST_USER"),
 		FalkorPassword: os.Getenv("FALKORDB_TEST_PASSWORD"),
-		Graph:          fmt.Sprintf("test_gmem_%d", time.Now().UnixNano()),
-		EmbedBase:      embedURL,
-		EmbedKey:       "test",
-		EmbedModel:     "test-model",
+		// test_-prefixed group_id satisfies the FalkorDB test ACL (write only test_*)
+		GroupID:    fmt.Sprintf("test_gmem_%d", time.Now().UnixNano()),
+		EmbedBase:  embedURL,
+		EmbedKey:   "test",
+		EmbedModel: "test-model",
 	}
 	c, err := NewClient(cfg)
 	if err != nil {
@@ -45,7 +46,7 @@ func newTestClient(t *testing.T, embedURL string) *Client {
 		t.Fatalf("init: %v", err)
 	}
 	t.Cleanup(func() {
-		c.db.Conn.Do(ctx, "GRAPH.DELETE", cfg.Graph)
+		c.db.Conn.Do(ctx, "GRAPH.DELETE", c.GraphName())
 	})
 	return c
 }

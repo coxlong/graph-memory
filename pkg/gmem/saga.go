@@ -20,6 +20,91 @@ type Saga struct {
 	CreatedAt                       string `json:"created_at"`
 }
 
+// GetOrCreateSaga returns the existing saga by (name, group_id), or creates one.
+// Aligns with graphiti's _get_or_create_saga. createdAt, if empty, defaults to now.
+func (c *Client) GetOrCreateSaga(name, groupID, createdAt string) (*Saga, error) {
+	if name == "" {
+		return nil, fmt.Errorf("saga name required")
+	}
+	gid := c.GroupID(groupID)
+	if createdAt == "" {
+		createdAt = nowUTC()
+	}
+	res, err := c.graph.ROQuery(`MATCH (n:Saga {name: $name, group_id: $gid}) RETURN n LIMIT 1`,
+		map[string]any{"name": name, "gid": gid}, nil)
+	if err != nil {
+		return nil, err
+	}
+	if res.Next() {
+		if val, err := res.Record().GetByIndex(0); err == nil {
+			if n, ok := val.(*falkordb.Node); ok {
+				return sagaFromNode(n), nil
+			}
+		}
+	}
+	return c.CreateSaga(&Saga{Name: name, GroupID: gid, CreatedAt: createdAt})
+}
+
+// previousEpisodeUUID returns the saga's most recent episode UUID excluding the
+// current one, ordered by valid_at DESC then created_at DESC — aligns with
+// graphiti's _saga_get_previous_episode_uuid. Empty if the saga has no prior episode.
+func (c *Client) previousEpisodeUUID(sagaUUID, currentEpisodeUUID string) (string, error) {
+	res, err := c.graph.ROQuery(`MATCH (s:Saga {uuid: $saga})-[:HAS_EPISODE]->(e:Episodic)
+		WHERE e.uuid <> $cur RETURN e.uuid AS uuid ORDER BY e.valid_at DESC, e.created_at DESC LIMIT 1`,
+		map[string]any{"saga": sagaUUID, "cur": currentEpisodeUUID}, nil)
+	if err != nil {
+		return "", err
+	}
+	if !res.Next() {
+		return "", nil
+	}
+	v, err := res.Record().GetByIndex(0)
+	if err != nil {
+		return "", err
+	}
+	return strVal(v), nil
+}
+
+// linkEpisodeToSaga creates the HAS_EPISODE (saga→episode) and, if the saga
+// already had a prior episode, the NEXT_EPISODE (prev→episode) edge, then
+// updates the saga's first/last_episode_uuid. Aligns with graphiti's episode
+// saga bookkeeping. No-op if sagaUUID is empty.
+func (c *Client) linkEpisodeToSaga(sagaUUID, episodeUUID, groupID string) error {
+	if sagaUUID == "" {
+		return nil
+	}
+	gid := c.GroupID(groupID)
+	ts := nowUTC()
+	// HAS_EPISODE: saga -> episode
+	if _, err := c.graph.Query(`MATCH (s:Saga {uuid: $s}), (e:Episodic {uuid: $ep})
+		MERGE (s)-[r:HAS_EPISODE {uuid: $ru}]->(e)
+		SET r.group_id = $gid, r.created_at = $ts`,
+		map[string]any{"s": sagaUUID, "ep": episodeUUID, "ru": newUUID(), "gid": gid, "ts": ts}, nil); err != nil {
+		return fmt.Errorf("has_episode: %w", err)
+	}
+	// NEXT_EPISODE: previous episode -> this episode
+	prev, err := c.previousEpisodeUUID(sagaUUID, episodeUUID)
+	if err != nil {
+		return fmt.Errorf("previous episode: %w", err)
+	}
+	if prev != "" {
+		if _, err := c.graph.Query(`MATCH (p:Episodic {uuid: $p}), (e:Episodic {uuid: $ep})
+			MERGE (p)-[r:NEXT_EPISODE {uuid: $ru}]->(e)
+			SET r.group_id = $gid, r.created_at = $ts`,
+			map[string]any{"p": prev, "ep": episodeUUID, "ru": newUUID(), "gid": gid, "ts": ts}, nil); err != nil {
+			return fmt.Errorf("next_episode: %w", err)
+		}
+	}
+	// update first/last_episode_uuid on the saga
+	if _, err := c.graph.Query(`MATCH (s:Saga {uuid: $s})
+		SET s.last_episode_uuid = $ep,
+			s.first_episode_uuid = CASE WHEN s.first_episode_uuid IS NULL OR s.first_episode_uuid = '' THEN $ep ELSE s.first_episode_uuid END`,
+		map[string]any{"s": sagaUUID, "ep": episodeUUID}, nil); err != nil {
+		return fmt.Errorf("saga episode watermark: %w", err)
+	}
+	return nil
+}
+
 func (c *Client) CreateSaga(s *Saga) (*Saga, error) {
 	if s.Name == "" {
 		return nil, fmt.Errorf("saga name required")
@@ -55,15 +140,15 @@ func (c *Client) CreateSaga(s *Saga) (*Saga, error) {
 func sagaFromNode(n *falkordb.Node) *Saga {
 	p := n.Properties
 	return &Saga{
-		UUID:                            fmt.Sprint(p["uuid"]),
-		Name:                            fmt.Sprint(p["name"]),
-		GroupID:                         fmt.Sprint(p["group_id"]),
-		Summary:                         fmt.Sprint(p["summary"]),
-		FirstEpisodeUUID:                fmt.Sprint(p["first_episode_uuid"]),
-		LastEpisodeUUID:                 fmt.Sprint(p["last_episode_uuid"]),
-		LastSummarizedAt:                fmt.Sprint(p["last_summarized_at"]),
-		LastSummarizedEpisodeValidAt:    fmt.Sprint(p["last_summarized_episode_valid_at"]),
-		CreatedAt:                       fmt.Sprint(p["created_at"]),
+		UUID:                            strVal(p["uuid"]),
+		Name:                            strVal(p["name"]),
+		GroupID:                         strVal(p["group_id"]),
+		Summary:                         strVal(p["summary"]),
+		FirstEpisodeUUID:                strVal(p["first_episode_uuid"]),
+		LastEpisodeUUID:                 strVal(p["last_episode_uuid"]),
+		LastSummarizedAt:                strVal(p["last_summarized_at"]),
+		LastSummarizedEpisodeValidAt:    strVal(p["last_summarized_episode_valid_at"]),
+		CreatedAt:                       strVal(p["created_at"]),
 	}
 }
 

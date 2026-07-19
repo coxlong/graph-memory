@@ -6,7 +6,7 @@ import (
 )
 
 var (
-	sagaUUID, sagaName, sagaSummary, sagaGroupID, sagaFirst, sagaLast, sagaLSA, sagaLSEVA string
+	sagaUUID, sagaName, sagaSummary, sagaFirst, sagaLast, sagaLSA, sagaLSEVA string
 )
 
 func init() {
@@ -15,7 +15,6 @@ func init() {
 	sagaCreateCmd.Flags().StringVar(&sagaFirst, "first-episode-uuid", "", "first episode uuid")
 	sagaCreateCmd.Flags().StringVar(&sagaLast, "last-episode-uuid", "", "last episode uuid")
 	sagaCreateCmd.Flags().StringVar(&sagaLSEVA, "last-summarized-episode-valid-at", "", "RFC3339 valid_at of last summarized episode")
-	sagaCreateCmd.Flags().StringVar(&sagaGroupID, "group-id", "", "group id")
 	_ = sagaCreateCmd.MarkFlagRequired("name")
 
 	sagaGetCmd.Flags().StringVar(&sagaUUID, "uuid", "", "saga uuid")
@@ -44,7 +43,6 @@ var sagaCreateCmd = &cobra.Command{
 		s, err := c.CreateSaga(&gmem.Saga{
 			Name:                            sagaName,
 			Summary:                         sagaSummary,
-			GroupID:                         sagaGroupID,
 			FirstEpisodeUUID:                sagaFirst,
 			LastEpisodeUUID:                 sagaLast,
 			LastSummarizedEpisodeValidAt:    sagaLSEVA,

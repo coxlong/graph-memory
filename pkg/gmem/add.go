@@ -10,11 +10,12 @@ type AddEntityInput struct {
 }
 
 type AddEdgeInput struct {
-	Source  string `json:"source"` // entity name
-	Target  string `json:"target"` // entity name
-	Name    string `json:"name"`
-	Fact    string `json:"fact"`
-	ValidAt string `json:"valid_at,omitempty"`
+	Source    string `json:"source"` // entity name
+	Target    string `json:"target"` // entity name
+	Name      string `json:"name"`
+	Fact      string `json:"fact"`
+	ValidAt   string `json:"valid_at,omitempty"`
+	ExpiredAt string `json:"expired_at,omitempty"`
 }
 
 type AddInput struct {
@@ -22,6 +23,7 @@ type AddInput struct {
 	Entities []AddEntityInput `json:"entities,omitempty"`
 	Edges    []AddEdgeInput   `json:"edges,omitempty"`
 	GroupID  string           `json:"group_id,omitempty"`
+	Saga     string           `json:"saga,omitempty"` // saga name; links episode via HAS_EPISODE/NEXT_EPISODE
 	Lenient  bool             `json:"-"`
 }
 
@@ -41,6 +43,21 @@ func (c *Client) Add(in *AddInput) (*AddResult, error) {
 		return nil, fmt.Errorf("episode: %w", err)
 	}
 	result := &AddResult{EpisodeUUID: ep.UUID, Entities: map[string]string{}}
+
+	// optional saga linkage (HAS_EPISODE + NEXT_EPISODE chain)
+	if in.Saga != "" {
+		sagaCreatedAt := ep.ValidAt
+		if sagaCreatedAt == "" {
+			sagaCreatedAt = ep.CreatedAt
+		}
+		saga, err := c.GetOrCreateSaga(in.Saga, gid, sagaCreatedAt)
+		if err != nil {
+			return result, fmt.Errorf("saga: %w", err)
+		}
+		if err := c.linkEpisodeToSaga(saga.UUID, ep.UUID, gid); err != nil {
+			return result, err
+		}
+	}
 
 	// upsert entities + MENTIONS
 	for _, in2 := range in.Entities {
@@ -83,7 +100,7 @@ func (c *Client) Add(in *AddInput) (*AddResult, error) {
 		edge, err := c.UpsertEdge(&Edge{
 			Name: ei.Name, Fact: ei.Fact, GroupID: gid,
 			SourceUUID: srcUUID, TargetUUID: tgtUUID,
-			ValidAt: ei.ValidAt, Episodes: []string{ep.UUID},
+			ValidAt: ei.ValidAt, ExpiredAt: ei.ExpiredAt, Episodes: []string{ep.UUID},
 		}, in.Lenient)
 		if err != nil {
 			return result, fmt.Errorf("edge %q: %w", ei.Name, err)

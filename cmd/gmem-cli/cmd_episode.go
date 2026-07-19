@@ -4,13 +4,12 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var episodeUUID, episodeGroup string
+var episodeUUID string
 var episodeLimit int
 
 func init() {
 	episodeGetCmd.Flags().StringVar(&episodeUUID, "uuid", "", "episode uuid")
 	_ = episodeGetCmd.MarkFlagRequired("uuid")
-	episodeListCmd.Flags().StringVar(&episodeGroup, "group-id", "", "group id")
 	episodeListCmd.Flags().IntVar(&episodeLimit, "limit", 20, "max episodes")
 	episodeCmd.AddCommand(episodeGetCmd, episodeListCmd)
 	rootCmd.AddCommand(episodeCmd)
@@ -40,7 +39,7 @@ var episodeListCmd = &cobra.Command{
 		if err != nil {
 			fatal(err)
 		}
-		eps, err := c.ListEpisodes(episodeGroup, episodeLimit)
+		eps, err := c.ListEpisodes("", episodeLimit)
 		if err != nil {
 			fatal(err)
 		}

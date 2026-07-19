@@ -97,13 +97,13 @@ func (c *Client) UpsertEntity(e *Entity, lenient bool) (*Entity, bool, error) {
 func entityFromNode(n *falkordb.Node) *Entity {
 	p := n.Properties
 	return &Entity{
-		UUID:       fmt.Sprint(p["uuid"]),
-		Name:       fmt.Sprint(p["name"]),
-		GroupID:    fmt.Sprint(p["group_id"]),
+		UUID:       strVal(p["uuid"]),
+		Name:       strVal(p["name"]),
+		GroupID:    strVal(p["group_id"]),
 		Labels:     n.Labels,
-		Summary:    fmt.Sprint(p["summary"]),
-		Attributes: jsonToMap(fmt.Sprint(p["attributes"])),
-		CreatedAt:  fmt.Sprint(p["created_at"]),
+		Summary:    strVal(p["summary"]),
+		Attributes: jsonToMap(strVal(p["attributes"])),
+		CreatedAt:  strVal(p["created_at"]),
 	}
 }
 

@@ -148,10 +148,10 @@ func (c *Client) GetCommunity(uuid string) (*Community, error) {
 		return nil, fmt.Errorf("unexpected record type")
 	}
 	com := &Community{
-		UUID:    fmt.Sprint(n.Properties["uuid"]),
-		Name:    fmt.Sprint(n.Properties["name"]),
-		GroupID: fmt.Sprint(n.Properties["group_id"]),
-		Summary: fmt.Sprint(n.Properties["summary"]),
+		UUID:    strVal(n.Properties["uuid"]),
+		Name:    strVal(n.Properties["name"]),
+		GroupID: strVal(n.Properties["group_id"]),
+		Summary: strVal(n.Properties["summary"]),
 	}
 	// fetch members
 	mres, err := c.graph.ROQuery(`MATCH (c:Community {uuid: $uuid})-[r:HAS_MEMBER]->(e:Entity) RETURN e.uuid`,

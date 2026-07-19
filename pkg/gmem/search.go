@@ -141,17 +141,22 @@ func (c *Client) SearchEntities(query string, limit int) ([]EntityWithScore, err
 	return out, nil
 }
 
-// edgeTemporalFilter returns temporal WHERE clause and params.
-// A valid edge is one whose invalid_at is absent (NULL) or empty string.
+// edgeTemporalFilter returns the temporal WHERE clause and params.
+// At a point in time T, an edge is "active" if valid_at <= T and neither
+// invalid_at nor expired_at has occurred by T (absent, empty, or > T) —
+// aligned with graphiti's valid_at/invalid_at/expired_at semantics.
+// With no as-of, "now" is used (so future expirations remain active).
 func edgeTemporalFilter(asOf string, includeInvalid bool) (string, map[string]any) {
-	if asOf != "" {
-		return "r.valid_at <= $asOf AND (r.invalid_at IS NULL OR r.invalid_at = '' OR r.invalid_at > $asOf)",
-			map[string]any{"asOf": asOf}
+	if includeInvalid {
+		return "true", map[string]any{}
 	}
-	if !includeInvalid {
-		return "r.invalid_at IS NULL OR r.invalid_at = ''", map[string]any{}
+	if asOf == "" {
+		asOf = nowUTC()
 	}
-	return "true", map[string]any{}
+	return "r.valid_at <= $asOf AND " +
+			"(r.invalid_at IS NULL OR r.invalid_at = '' OR r.invalid_at > $asOf) AND " +
+			"(r.expired_at IS NULL OR r.expired_at = '' OR r.expired_at > $asOf)",
+		map[string]any{"asOf": asOf}
 }
 
 // SearchEdges vector ∪ fulltext retrieval of RELATES_TO edges with temporal filtering

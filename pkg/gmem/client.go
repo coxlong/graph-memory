@@ -11,11 +11,13 @@ import (
 )
 
 type Client struct {
-	cfg    *Config
-	db     *falkordb.FalkorDB
-	graph  *falkordb.Graph
-	Embed  *Embedder
-	Schema *Schema
+	cfg       *Config
+	db        *falkordb.FalkorDB
+	graph     *falkordb.Graph
+	graphName string
+	group     string
+	Embed     *Embedder
+	Schema    *Schema
 }
 
 func NewClient(cfg *Config) (*Client, error) {
@@ -27,12 +29,16 @@ func NewClient(cfg *Config) (*Client, error) {
 	if err != nil {
 		return nil, fmt.Errorf("connect falkordb: %w", err)
 	}
+	// graphiti-aligned physical isolation: each group_id is a separate FalkorDB
+	// graph. The configured group_id is the graph name; --group-id selects another.
 	c := &Client{
-		cfg:   cfg,
-		db:    db,
-		Embed: NewEmbedder(cfg.EmbedBase, cfg.EmbedKey, cfg.EmbedModel),
+		cfg:       cfg,
+		db:        db,
+		group:     groupID(cfg.GroupID),
+		graphName: groupID(cfg.GroupID),
+		Embed:     NewEmbedder(cfg.EmbedBase, cfg.EmbedKey, cfg.EmbedModel),
 	}
-	c.graph = db.SelectGraph(cfg.Graph)
+	c.graph = db.SelectGraph(c.graphName)
 	if cfg.SchemaPath != "" {
 		s, err := LoadSchema(cfg.SchemaPath)
 		if err != nil {
@@ -45,10 +51,22 @@ func NewClient(cfg *Config) (*Client, error) {
 	return c, nil
 }
 
-// GroupID returns a valid group_id; empty string becomes "default"
-func (c *Client) GroupID(g string) string {
+// GraphName returns the FalkorDB graph name this client is bound to (== group id).
+func (c *Client) GraphName() string { return c.graphName }
+
+// groupID normalizes a group id; empty string becomes "default".
+func groupID(g string) string {
 	if g == "" {
 		return "default"
+	}
+	return g
+}
+
+// GroupID returns a valid group id for the active graph. Empty input falls back
+// to the client's active group (the one the selected FalkorDB graph belongs to).
+func (c *Client) GroupID(g string) string {
+	if g == "" {
+		return c.group
 	}
 	return g
 }
@@ -75,9 +93,11 @@ var indexQueries = []string{
 	"CREATE INDEX FOR (n:Episodic) ON (n.uuid, n.group_id, n.created_at, n.valid_at)",
 	"CREATE INDEX FOR (n:Community) ON (n.uuid)",
 	"CREATE INDEX FOR (n:Saga) ON (n.uuid, n.group_id, n.name)",
-	"CREATE INDEX FOR ()-[e:RELATES_TO]-() ON (e.uuid, e.group_id, e.name, e.created_at, e.valid_at, e.invalid_at)",
+	"CREATE INDEX FOR ()-[e:RELATES_TO]-() ON (e.uuid, e.group_id, e.name, e.created_at, e.expired_at, e.valid_at, e.invalid_at)",
 	"CREATE INDEX FOR ()-[e:MENTIONS]-() ON (e.uuid, e.group_id)",
 	"CREATE INDEX FOR ()-[e:HAS_MEMBER]-() ON (e.uuid)",
+	"CREATE INDEX FOR ()-[e:HAS_EPISODE]-() ON (e.uuid, e.group_id)",
+	"CREATE INDEX FOR ()-[e:NEXT_EPISODE]-() ON (e.uuid, e.group_id)",
 	"CALL db.idx.fulltext.createNodeIndex('Entity', 'name', 'summary', 'group_id')",
 	"CALL db.idx.fulltext.createNodeIndex('Episodic', 'content', 'source', 'source_description', 'group_id')",
 	"CALL db.idx.fulltext.createNodeIndex('Community', 'name')",
@@ -110,7 +130,7 @@ type Status struct {
 }
 
 func (c *Client) Status() *Status {
-	st := &Status{Graph: c.cfg.Graph}
+	st := &Status{Graph: c.graphName}
 	if _, err := c.db.Conn.Ping(context.Background()).Result(); err != nil {
 		st.FalkorDB = "error: " + err.Error()
 	} else {

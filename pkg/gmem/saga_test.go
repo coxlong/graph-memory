@@ -16,7 +16,7 @@ func TestCreateAndGetSaga(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if s.UUID == "" || s.GroupID != "default" || s.CreatedAt == "" {
+	if s.UUID == "" || s.GroupID == "" || s.CreatedAt == "" {
 		t.Fatalf("bad saga: %+v", s)
 	}
 	got, err := c.GetSaga(s.UUID)

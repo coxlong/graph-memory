@@ -8,8 +8,8 @@ import (
 )
 
 var (
-	addContent, addSource, addEntities, addEdges, addMetadata, addValidAt, addGroup string
-	addLenient                                                                      bool
+	addContent, addSource, addEntities, addEdges, addMetadata, addValidAt, addSaga string
+	addLenient                                                                    bool
 )
 
 func init() {
@@ -19,7 +19,7 @@ func init() {
 	addCmd.Flags().StringVar(&addEdges, "edges", "", "edges JSON array")
 	addCmd.Flags().StringVar(&addMetadata, "metadata", "", "episode metadata JSON object")
 	addCmd.Flags().StringVar(&addValidAt, "valid-at", "", "RFC3339 time of the episode")
-	addCmd.Flags().StringVar(&addGroup, "group-id", "", "group id")
+	addCmd.Flags().StringVar(&addSaga, "saga", "", "saga name; links the episode via HAS_EPISODE/NEXT_EPISODE")
 	addCmd.Flags().BoolVar(&addLenient, "lenient", false, "skip schema validation")
 	_ = addCmd.MarkFlagRequired("content")
 	rootCmd.AddCommand(addCmd)
@@ -35,7 +35,7 @@ var addCmd = &cobra.Command{
 		}
 		in := &gmem.AddInput{
 			Episode: &gmem.Episode{Content: addContent, Source: addSource, ValidAt: addValidAt},
-			GroupID: addGroup,
+			Saga:    addSaga,
 			Lenient: addLenient,
 		}
 		if addEntities != "" {
@@ -62,8 +62,8 @@ var addCmd = &cobra.Command{
 }
 
 var (
-	triSource, triName, triFact, triTarget, triGroup, triValidAt string
-	triLenient                                                   bool
+	triSource, triName, triFact, triTarget, triValidAt string
+	triLenient                                        bool
 )
 
 func init() {
@@ -71,7 +71,6 @@ func init() {
 	addTripletCmd.Flags().StringVar(&triName, "name", "", "relation name")
 	addTripletCmd.Flags().StringVar(&triFact, "fact", "", "natural language fact")
 	addTripletCmd.Flags().StringVar(&triTarget, "target", "", "target entity name")
-	addTripletCmd.Flags().StringVar(&triGroup, "group-id", "", "group id")
 	addTripletCmd.Flags().StringVar(&triValidAt, "valid-at", "", "RFC3339 time")
 	addTripletCmd.Flags().BoolVar(&triLenient, "lenient", false, "skip schema validation")
 	_ = addTripletCmd.MarkFlagRequired("source")
@@ -89,7 +88,7 @@ var addTripletCmd = &cobra.Command{
 		if err != nil {
 			fatal(err)
 		}
-		res, err := c.AddTriplet(triSource, triName, triFact, triTarget, triGroup, triValidAt, triLenient)
+		res, err := c.AddTriplet(triSource, triName, triFact, triTarget, "", triValidAt, triLenient)
 		if err != nil {
 			fatal(err)
 		}

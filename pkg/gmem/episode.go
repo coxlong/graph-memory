@@ -58,16 +58,16 @@ func (c *Client) CreateEpisode(ep *Episode) (*Episode, error) {
 func episodeFromNode(n *falkordb.Node) *Episode {
 	p := n.Properties
 	ep := &Episode{
-		UUID:              fmt.Sprint(p["uuid"]),
-		Name:              fmt.Sprint(p["name"]),
-		GroupID:           fmt.Sprint(p["group_id"]),
-		Content:           fmt.Sprint(p["content"]),
-		Source:            fmt.Sprint(p["source"]),
-		SourceDescription: fmt.Sprint(p["source_description"]),
-		Metadata:          jsonToMap(fmt.Sprint(p["episode_metadata"])),
+		UUID:              strVal(p["uuid"]),
+		Name:              strVal(p["name"]),
+		GroupID:           strVal(p["group_id"]),
+		Content:           strVal(p["content"]),
+		Source:            strVal(p["source"]),
+		SourceDescription: strVal(p["source_description"]),
+		Metadata:          jsonToMap(strVal(p["episode_metadata"])),
 		EntityEdges:       strSlice(p["entity_edges"]),
-		CreatedAt:         fmt.Sprint(p["created_at"]),
-		ValidAt:           fmt.Sprint(p["valid_at"]),
+		CreatedAt:         strVal(p["created_at"]),
+		ValidAt:           strVal(p["valid_at"]),
 	}
 	return ep
 }

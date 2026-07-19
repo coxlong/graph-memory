@@ -1,6 +1,9 @@
 package gmem
 
-import "encoding/json"
+import (
+	"encoding/json"
+	"fmt"
+)
 
 // mapToJSON serializes a map as JSON string (FalkorDB properties don't support nested maps)
 func mapToJSON(m map[string]any) (string, error) {
@@ -41,4 +44,13 @@ func contains(ss []string, s string) bool {
 		}
 	}
 	return false
+}
+
+// strVal returns v as a string; nil (unset FalkorDB property) becomes "".
+// fmt.Sprint(nil) would yield "<nil>", which we must avoid for optional properties.
+func strVal(v any) string {
+	if v == nil {
+		return ""
+	}
+	return fmt.Sprint(v)
 }

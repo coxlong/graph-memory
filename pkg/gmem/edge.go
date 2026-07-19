@@ -51,6 +51,9 @@ func (c *Client) UpsertEdge(e *Edge, lenient bool) (*Edge, error) {
 	if e.InvalidAt, err = normalizeTime(e.InvalidAt); err != nil {
 		return nil, err
 	}
+	if e.ExpiredAt, err = normalizeTime(e.ExpiredAt); err != nil {
+		return nil, err
+	}
 	attrs, err := mapToJSON(e.Attributes)
 	if err != nil {
 		return nil, err
@@ -59,13 +62,13 @@ func (c *Client) UpsertEdge(e *Edge, lenient bool) (*Edge, error) {
 		MERGE (s)-[r:RELATES_TO {uuid: $uuid}]->(t)
 		SET r.name = $name, r.group_id = $gid, r.fact = $fact,
 			r.episodes = $episodes, r.created_at = $created_at,
-			r.valid_at = $valid_at, r.invalid_at = $invalid_at, r.attributes = $attrs,
-			r.fact_embedding = vecf32($emb)`,
+			r.valid_at = $valid_at, r.invalid_at = $invalid_at, r.expired_at = $expired_at,
+			r.attributes = $attrs, r.fact_embedding = vecf32($emb)`,
 		map[string]any{
 			"s": e.SourceUUID, "t": e.TargetUUID, "uuid": e.UUID, "name": e.Name,
 			"gid": e.GroupID, "fact": e.Fact, "episodes": e.Episodes,
 			"created_at": e.CreatedAt, "valid_at": e.ValidAt, "invalid_at": e.InvalidAt,
-			"attrs": attrs, "emb": vecParam(emb),
+			"expired_at": e.ExpiredAt, "attrs": attrs, "emb": vecParam(emb),
 		}, nil)
 	if err != nil {
 		return nil, err
@@ -76,22 +79,22 @@ func (c *Client) UpsertEdge(e *Edge, lenient bool) (*Edge, error) {
 func edgeFromRel(r *falkordb.Edge) *Edge {
 	p := r.Properties
 	e := &Edge{
-		UUID:       fmt.Sprint(p["uuid"]),
-		Name:       fmt.Sprint(p["name"]),
-		GroupID:    fmt.Sprint(p["group_id"]),
-		Fact:       fmt.Sprint(p["fact"]),
+		UUID:       strVal(p["uuid"]),
+		Name:       strVal(p["name"]),
+		GroupID:    strVal(p["group_id"]),
+		Fact:       strVal(p["fact"]),
 		Episodes:   strSlice(p["episodes"]),
-		CreatedAt:  fmt.Sprint(p["created_at"]),
-		ValidAt:    fmt.Sprint(p["valid_at"]),
-		InvalidAt:  fmt.Sprint(p["invalid_at"]),
-		ExpiredAt:  fmt.Sprint(p["expired_at"]),
-		Attributes: jsonToMap(fmt.Sprint(p["attributes"])),
+		CreatedAt:  strVal(p["created_at"]),
+		ValidAt:    strVal(p["valid_at"]),
+		InvalidAt:  strVal(p["invalid_at"]),
+		ExpiredAt:  strVal(p["expired_at"]),
+		Attributes: jsonToMap(strVal(p["attributes"])),
 	}
 	if r.Source != nil && r.Source.Properties != nil {
-		e.SourceUUID = fmt.Sprint(r.Source.Properties["uuid"])
+		e.SourceUUID = strVal(r.Source.Properties["uuid"])
 	}
 	if r.Destination != nil && r.Destination.Properties != nil {
-		e.TargetUUID = fmt.Sprint(r.Destination.Properties["uuid"])
+		e.TargetUUID = strVal(r.Destination.Properties["uuid"])
 	}
 	return e
 }

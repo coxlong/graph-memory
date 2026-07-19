@@ -8,8 +8,8 @@ import (
 )
 
 var (
-	edgeUUID, edgeSrc, edgeTgt, edgeName, edgeFact, edgeValidAt, edgeInvalidAt, edgeEpUUID, edgeAttrs string
-	edgeLenient                                                                                       bool
+	edgeUUID, edgeSrc, edgeTgt, edgeName, edgeFact, edgeValidAt, edgeExpiredAt, edgeInvalidAt, edgeEpUUID, edgeAttrs string
+	edgeLenient                                                                                                      bool
 )
 
 func init() {
@@ -17,7 +17,8 @@ func init() {
 	edgeUpsertCmd.Flags().StringVar(&edgeTgt, "target-uuid", "", "target entity uuid")
 	edgeUpsertCmd.Flags().StringVar(&edgeName, "name", "", "relation name (e.g. WORKS_ON)")
 	edgeUpsertCmd.Flags().StringVar(&edgeFact, "fact", "", "natural language fact")
-	edgeUpsertCmd.Flags().StringVar(&edgeValidAt, "valid-at", "", "RFC3339 time")
+	edgeUpsertCmd.Flags().StringVar(&edgeValidAt, "valid-at", "", "RFC3339 time the fact became true")
+	edgeUpsertCmd.Flags().StringVar(&edgeExpiredAt, "expired-at", "", "RFC3339 time the fact expires")
 	edgeUpsertCmd.Flags().StringVar(&edgeEpUUID, "episode-uuid", "", "source episode uuid")
 	edgeUpsertCmd.Flags().StringVar(&edgeAttrs, "attributes", "", "attributes JSON")
 	edgeUpsertCmd.Flags().BoolVar(&edgeLenient, "lenient", false, "skip schema validation")
@@ -58,7 +59,7 @@ var edgeUpsertCmd = &cobra.Command{
 		}
 		e, err := c.UpsertEdge(&gmem.Edge{
 			Name: edgeName, Fact: edgeFact, SourceUUID: edgeSrc, TargetUUID: edgeTgt,
-			ValidAt: edgeValidAt, Episodes: episodes, Attributes: attrs,
+			ValidAt: edgeValidAt, ExpiredAt: edgeExpiredAt, Episodes: episodes, Attributes: attrs,
 		}, edgeLenient)
 		if err != nil {
 			fatal(err)

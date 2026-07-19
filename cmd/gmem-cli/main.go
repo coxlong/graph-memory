@@ -9,7 +9,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var configPath string
+var groupIDFlag string
 
 var rootCmd = &cobra.Command{
 	Use:   "gmem-cli",
@@ -17,13 +17,16 @@ var rootCmd = &cobra.Command{
 }
 
 func init() {
-	rootCmd.PersistentFlags().StringVar(&configPath, "config", "", "path to gmem.yaml")
+	rootCmd.PersistentFlags().StringVar(&groupIDFlag, "group-id", "", "group id (selects the FalkorDB graph; default from config)")
 }
 
 func loadClient() (*gmem.Client, error) {
-	cfg, err := gmem.LoadConfig(configPath)
+	cfg, err := gmem.LoadConfig("")
 	if err != nil {
 		return nil, err
+	}
+	if groupIDFlag != "" {
+		cfg.GroupID = groupIDFlag
 	}
 	return gmem.NewClient(cfg)
 }

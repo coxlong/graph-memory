@@ -14,7 +14,7 @@ func TestCreateAndGetEpisode(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if ep.UUID == "" || ep.CreatedAt == "" || ep.GroupID != "default" {
+	if ep.UUID == "" || ep.CreatedAt == "" || ep.GroupID == "" {
 		t.Fatalf("bad episode: %+v", ep)
 	}
 

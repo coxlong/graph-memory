@@ -6,16 +6,15 @@ import (
 )
 
 var (
-	searchQuery, searchAsOf, searchGroup string
-	searchLimit                          int
-	searchIncludeInvalid                 bool
+	searchQuery, searchAsOf string
+	searchLimit             int
+	searchIncludeInvalid    bool
 )
 
 func init() {
 	searchCmd.Flags().StringVar(&searchQuery, "query", "", "search query")
 	searchCmd.Flags().IntVar(&searchLimit, "limit", 10, "max results per category")
 	searchCmd.Flags().StringVar(&searchAsOf, "as-of", "", "RFC3339 point-in-time filter")
-	searchCmd.Flags().StringVar(&searchGroup, "group-id", "", "group id")
 	searchCmd.Flags().BoolVar(&searchIncludeInvalid, "include-invalid", false, "include invalidated facts")
 	_ = searchCmd.MarkFlagRequired("query")
 
@@ -42,7 +41,6 @@ var searchCmd = &cobra.Command{
 			fatal(err)
 		}
 		res, err := c.Search(searchQuery, gmem.SearchOpts{
-			GroupID:        searchGroup,
 			AsOf:           searchAsOf,
 			Limit:          searchLimit,
 			IncludeInvalid: searchIncludeInvalid,
