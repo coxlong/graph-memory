@@ -32,3 +32,13 @@ func strSlice(v any) []string {
 	}
 	return out
 }
+
+// contains reports whether ss contains s
+func contains(ss []string, s string) bool {
+	for _, x := range ss {
+		if x == s {
+			return true
+		}
+	}
+	return false
+}
