@@ -96,6 +96,35 @@ func edgeFromRel(r *falkordb.Edge) *Edge {
 	return e
 }
 
+// edgeFromRecord extracts an edge with its score and endpoint uuids from a
+// record laid out as [r, sourceUUID, targetUUID, score].
+func edgeFromRecord(rec *falkordb.Record) *EdgeWithScore {
+	if rec == nil {
+		return nil
+	}
+	rVal, err := rec.GetByIndex(0)
+	if err != nil {
+		return nil
+	}
+	r, ok := rVal.(*falkordb.Edge)
+	if !ok {
+		return nil
+	}
+	e := edgeFromRel(r)
+	if su, err := rec.GetByIndex(1); err == nil {
+		if s, ok := su.(string); ok {
+			e.SourceUUID = s
+		}
+	}
+	if tu, err := rec.GetByIndex(2); err == nil {
+		if t, ok := tu.(string); ok {
+			e.TargetUUID = t
+		}
+	}
+	sc, _ := rec.GetByIndex(3)
+	return &EdgeWithScore{Edge: *e, Score: toFloat(sc)}
+}
+
 func (c *Client) GetEdge(uuid string) (*Edge, error) {
 	res, err := c.graph.ROQuery(`MATCH (s:Entity)-[r:RELATES_TO {uuid: $uuid}]->(t:Entity)
 		RETURN r, s.uuid AS suuid, t.uuid AS tuuid`,

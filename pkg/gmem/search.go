@@ -173,27 +173,21 @@ func (c *Client) searchEdgesFiltered(query string, limit int, asOf string, inclu
 	for k, v := range fparams {
 		params[k] = v
 	}
-	res, err := c.graph.ROQuery(`MATCH ()-[r:RELATES_TO]->()
+	res, err := c.graph.ROQuery(`MATCH (s:Entity)-[r:RELATES_TO]->(t)
 		WHERE r.fact_embedding IS NOT NULL AND `+filter+`
-		WITH r, (2 - vec.cosineDistance(r.fact_embedding, vecf32($vec)))/2 AS score
+		WITH r, s, t, (2 - vec.cosineDistance(r.fact_embedding, vecf32($vec)))/2 AS score
 		WHERE score > 0.3
-		RETURN r, score ORDER BY score DESC LIMIT $limit`, params, nil)
+		RETURN r, s.uuid, t.uuid, score ORDER BY score DESC LIMIT $limit`, params, nil)
 	if err != nil {
 		return nil, err
 	}
 	vr := []string{}
 	for res.Next() {
-		rVal, err := res.Record().GetByIndex(0)
-		if err != nil {
+		e := edgeFromRecord(res.Record())
+		if e == nil {
 			continue
 		}
-		r, ok := rVal.(*falkordb.Edge)
-		if !ok {
-			continue
-		}
-		e := edgeFromRel(r)
-		s, _ := res.Record().GetByIndex(1)
-		byID[e.UUID] = EdgeWithScore{Edge: *e, Score: toFloat(s)}
+		byID[e.UUID] = *e
 		vr = append(vr, e.UUID)
 	}
 	ranks = append(ranks, vr)
@@ -201,23 +195,18 @@ func (c *Client) searchEdgesFiltered(query string, limit int, asOf string, inclu
 	// fulltext path (tolerated if relationship index procedure is unavailable)
 	res, err = c.graph.ROQuery(`CALL db.idx.fulltext.queryRelationships('RELATES_TO', $q) YIELD relationship, score
 		WITH relationship AS r, score WHERE `+filter+`
-		RETURN r, score LIMIT $limit`,
+		MATCH (s:Entity)-[r]->(t)
+		RETURN r, s.uuid, t.uuid, score LIMIT $limit`,
 		map[string]any{"q": escapeFTQuery(query), "limit": limit, "asOf": asOf}, nil)
 	if err == nil {
 		fr := []string{}
 		for res.Next() {
-			rVal, err := res.Record().GetByIndex(0)
-			if err != nil {
+			e := edgeFromRecord(res.Record())
+			if e == nil {
 				continue
 			}
-			r, ok := rVal.(*falkordb.Edge)
-			if !ok {
-				continue
-			}
-			e := edgeFromRel(r)
-			s, _ := res.Record().GetByIndex(1)
 			if _, seen := byID[e.UUID]; !seen {
-				byID[e.UUID] = EdgeWithScore{Edge: *e, Score: toFloat(s)}
+				byID[e.UUID] = *e
 			}
 			fr = append(fr, e.UUID)
 		}
