@@ -25,12 +25,37 @@ func TestSearchEntities(t *testing.T) {
 	if _, _, err := c.UpsertEntity(&Entity{Name: "Alice Wonderland"}, false); err != nil {
 		t.Fatal(err)
 	}
-	res, err := c.SearchEntities("Alice", 10)
+	res, err := c.SearchEntities("Alice", 10, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(res) == 0 || res[0].Name != "Alice Wonderland" {
 		t.Fatalf("search: %+v", res)
+	}
+}
+
+func TestSearchEntitiesTypeFilter(t *testing.T) {
+	srv := newFakeEmbedServer(t)
+	defer srv.Close()
+	c := newTestClient(t, srv.URL)
+	if _, _, err := c.UpsertEntity(&Entity{Name: "FilterAlice", Labels: []string{"Person"}}, false); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := c.UpsertEntity(&Entity{Name: "FilterAcme", Labels: []string{"Organization"}}, false); err != nil {
+		t.Fatal(err)
+	}
+	// match by type
+	res, err := c.SearchEntities("Filter", 10, []string{"Person"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res) != 1 || res[0].Name != "FilterAlice" {
+		t.Fatalf("type filter Person: %+v", res)
+	}
+	// mismatched type -> no results
+	res, _ = c.SearchEntities("Filter", 10, []string{"Location"})
+	if len(res) != 0 {
+		t.Fatalf("type filter Location should match nothing: %+v", res)
 	}
 }
 
@@ -47,7 +72,7 @@ func TestSearchEdgesTemporalFilter(t *testing.T) {
 	}, false)
 
 	// default (valid edge): should be found
-	res, err := c.SearchEdges("member of TeamA", 10, false)
+	res, err := c.SearchEdges("member of TeamA", 10, "", nil, false)
 	if err != nil || len(res) == 0 {
 		t.Fatalf("valid edge search: %v %v", res, err)
 	}
@@ -55,14 +80,39 @@ func TestSearchEdgesTemporalFilter(t *testing.T) {
 	if _, err := c.InvalidateEdge(e.UUID, "2026-06-01T00:00:00Z"); err != nil {
 		t.Fatal(err)
 	}
-	res, _ = c.SearchEdges("member of TeamA", 10, false)
+	res, _ = c.SearchEdges("member of TeamA", 10, "", nil, false)
 	if len(res) != 0 {
 		t.Fatalf("invalidated edge should be hidden: %v", res)
 	}
 	// includeInvalid finds it
-	res, _ = c.SearchEdges("member of TeamA", 10, true)
+	res, _ = c.SearchEdges("member of TeamA", 10, "", nil, true)
 	if len(res) != 1 {
 		t.Fatalf("includeInvalid: %v", res)
+	}
+}
+
+func TestSearchEdgesTypeFilter(t *testing.T) {
+	srv := newFakeEmbedServer(t)
+	defer srv.Close()
+	c := newTestClient(t, srv.URL)
+	a, _, _ := c.UpsertEntity(&Entity{Name: "TypeAlice"}, false)
+	b, _, _ := c.UpsertEntity(&Entity{Name: "TypeTeam"}, false)
+	if _, err := c.UpsertEdge(&Edge{
+		Name: "MEMBER_OF", Fact: "TypeAlice member of TypeTeam",
+		SourceUUID: a.UUID, TargetUUID: b.UUID,
+		ValidAt: "2026-01-01T00:00:00Z",
+	}, false); err != nil {
+		t.Fatal(err)
+	}
+	// match by type
+	res, err := c.SearchEdges("TypeAlice", 10, "", []string{"MEMBER_OF"}, false)
+	if err != nil || len(res) != 1 {
+		t.Fatalf("type filter MEMBER_OF: %v %v", res, err)
+	}
+	// mismatched type -> no results
+	res, _ = c.SearchEdges("TypeAlice", 10, "", []string{"KNOWS"}, false)
+	if len(res) != 0 {
+		t.Fatalf("type filter KNOWS should match nothing: %+v", res)
 	}
 }
 
@@ -81,16 +131,16 @@ func TestSearchAsOf(t *testing.T) {
 		t.Fatal(err)
 	}
 	// as-of March: edge still valid
-	res, err := c.Search("member of TeamB", SearchOpts{AsOf: "2026-03-01T00:00:00Z", Limit: 10})
+	res, err := c.SearchEdges("member of TeamB", 10, "2026-03-01T00:00:00Z", nil, false)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(res.Edges) != 1 {
-		t.Fatalf("as-of should see the edge: %+v", res.Edges)
+	if len(res) != 1 {
+		t.Fatalf("as-of should see the edge: %+v", res)
 	}
 	// now: default hides it
-	res, _ = c.Search("member of TeamB", SearchOpts{Limit: 10})
-	if len(res.Edges) != 0 {
-		t.Fatalf("now should not see invalidated edge: %+v", res.Edges)
+	res, _ = c.SearchEdges("member of TeamB", 10, "", nil, false)
+	if len(res) != 0 {
+		t.Fatalf("now should not see invalidated edge: %+v", res)
 	}
 }

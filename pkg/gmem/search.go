@@ -1,19 +1,11 @@
 package gmem
 
 import (
-	"fmt"
 	"sort"
 	"strings"
 
 	falkordb "github.com/FalkorDB/falkordb-go/v2"
 )
-
-type SearchOpts struct {
-	GroupID        string
-	AsOf           string
-	Limit          int
-	IncludeInvalid bool
-}
 
 type EntityWithScore struct {
 	Entity
@@ -23,17 +15,6 @@ type EntityWithScore struct {
 type EdgeWithScore struct {
 	Edge
 	Score float64 `json:"score"`
-}
-
-type EpisodeWithScore struct {
-	Episode
-	Score float64 `json:"score"`
-}
-
-type SearchResult struct {
-	Entities []EntityWithScore  `json:"entities"`
-	Edges    []EdgeWithScore    `json:"edges"`
-	Episodes []EpisodeWithScore `json:"episodes"`
 }
 
 // escapeFTQuery clears RedisSearch special characters
@@ -67,22 +48,37 @@ func rrfFuse(rankLists [][]string, k float64) []string {
 	return ids
 }
 
-// SearchEntities vector ∪ fulltext retrieval of entities
-func (c *Client) SearchEntities(query string, limit int) ([]EntityWithScore, error) {
+// entityTypePredicate returns a Cypher predicate matching an entity's labels
+// against the given type names. Empty types disables filtering ("true").
+func entityTypePredicate(types []string) string {
+	if len(types) == 0 {
+		return "true"
+	}
+	return "any(t IN $types WHERE t IN labels(n))"
+}
+
+// SearchEntities vector ∪ fulltext retrieval of entities, optionally narrowed
+// to the given entity type names (node labels excluding the base "Entity").
+func (c *Client) SearchEntities(query string, limit int, types []string) ([]EntityWithScore, error) {
 	vec, err := c.Embed.Embed(query)
 	if err != nil {
 		return nil, err
 	}
 	byID := map[string]EntityWithScore{}
 	ranks := [][]string{}
+	typePred := entityTypePredicate(types)
 
 	// vector path
+	params := map[string]any{"vec": vecParam(vec), "limit": limit}
+	if len(types) > 0 {
+		params["types"] = types
+	}
 	res, err := c.graph.ROQuery(`MATCH (n:Entity)
-		WHERE n.name_embedding IS NOT NULL
+		WHERE n.name_embedding IS NOT NULL AND `+typePred+`
 		WITH n, (2 - vec.cosineDistance(n.name_embedding, vecf32($vec)))/2 AS score
 		WHERE score > 0.3
 		RETURN n, score ORDER BY score DESC LIMIT $limit`,
-		map[string]any{"vec": vecParam(vec), "limit": limit}, nil)
+		params, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -105,9 +101,14 @@ func (c *Client) SearchEntities(query string, limit int) ([]EntityWithScore, err
 	ranks = append(ranks, vr)
 
 	// fulltext path (tolerated if index procedure is unavailable)
+	fulltextParams := map[string]any{"q": escapeFTQuery(query), "limit": limit}
+	if len(types) > 0 {
+		fulltextParams["types"] = types
+	}
 	res, err = c.graph.ROQuery(`CALL db.idx.fulltext.queryNodes('Entity', $q) YIELD node, score
-		RETURN node, score LIMIT $limit`,
-		map[string]any{"q": escapeFTQuery(query), "limit": limit}, nil)
+		WITH node AS n, score WHERE `+typePred+`
+		RETURN n, score LIMIT $limit`,
+		fulltextParams, nil)
 	if err == nil {
 		fr := []string{}
 		for res.Next() {
@@ -159,17 +160,36 @@ func edgeTemporalFilter(asOf string, includeInvalid bool) (string, map[string]an
 		map[string]any{"asOf": asOf}
 }
 
-// SearchEdges vector ∪ fulltext retrieval of RELATES_TO edges with temporal filtering
-func (c *Client) SearchEdges(query string, limit int, includeInvalid bool) ([]EdgeWithScore, error) {
-	return c.searchEdgesFiltered(query, limit, "", includeInvalid)
+// edgeTypePredicate returns a Cypher predicate matching an edge's semantic
+// type (the "name" property on RELATES_TO) against the given type names.
+// Empty types disables filtering ("true").
+func edgeTypePredicate(types []string) string {
+	if len(types) == 0 {
+		return "true"
+	}
+	return "r.name IN $types"
 }
 
-func (c *Client) searchEdgesFiltered(query string, limit int, asOf string, includeInvalid bool) ([]EdgeWithScore, error) {
+// SearchEdges vector ∪ fulltext retrieval of RELATES_TO edges with temporal
+// and type filtering. asOf (RFC3339) constrains to a point in time; types
+// narrows to the given semantic edge types (r.name).
+func (c *Client) SearchEdges(query string, limit int, asOf string, types []string, includeInvalid bool) ([]EdgeWithScore, error) {
+	if asOf != "" {
+		var err error
+		if asOf, err = normalizeTime(asOf); err != nil {
+			return nil, err
+		}
+	}
+	return c.searchEdgesFiltered(query, limit, asOf, types, includeInvalid)
+}
+
+func (c *Client) searchEdgesFiltered(query string, limit int, asOf string, types []string, includeInvalid bool) ([]EdgeWithScore, error) {
 	vec, err := c.Embed.Embed(query)
 	if err != nil {
 		return nil, err
 	}
 	filter, fparams := edgeTemporalFilter(asOf, includeInvalid)
+	typePred := edgeTypePredicate(types)
 	byID := map[string]EdgeWithScore{}
 	ranks := [][]string{}
 
@@ -178,8 +198,11 @@ func (c *Client) searchEdgesFiltered(query string, limit int, asOf string, inclu
 	for k, v := range fparams {
 		params[k] = v
 	}
+	if len(types) > 0 {
+		params["types"] = types
+	}
 	res, err := c.graph.ROQuery(`MATCH (s:Entity)-[r:RELATES_TO]->(t)
-		WHERE r.fact_embedding IS NOT NULL AND `+filter+`
+		WHERE r.fact_embedding IS NOT NULL AND `+filter+` AND `+typePred+`
 		WITH r, s, t, (2 - vec.cosineDistance(r.fact_embedding, vecf32($vec)))/2 AS score
 		WHERE score > 0.3
 		RETURN r, s.uuid, t.uuid, score ORDER BY score DESC LIMIT $limit`, params, nil)
@@ -198,11 +221,15 @@ func (c *Client) searchEdgesFiltered(query string, limit int, asOf string, inclu
 	ranks = append(ranks, vr)
 
 	// fulltext path (tolerated if relationship index procedure is unavailable)
+	fulltextParams := map[string]any{"q": escapeFTQuery(query), "limit": limit, "asOf": asOf}
+	if len(types) > 0 {
+		fulltextParams["types"] = types
+	}
 	res, err = c.graph.ROQuery(`CALL db.idx.fulltext.queryRelationships('RELATES_TO', $q) YIELD relationship, score
-		WITH relationship AS r, score WHERE `+filter+`
+		WITH relationship AS r, score WHERE `+filter+` AND `+typePred+`
 		MATCH (s:Entity)-[r]->(t)
 		RETURN r, s.uuid, t.uuid, score LIMIT $limit`,
-		map[string]any{"q": escapeFTQuery(query), "limit": limit, "asOf": asOf}, nil)
+		fulltextParams, nil)
 	if err == nil {
 		fr := []string{}
 		for res.Next() {
@@ -229,30 +256,6 @@ func (c *Client) searchEdgesFiltered(query string, limit int, asOf string, inclu
 	return out, nil
 }
 
-// searchEpisodes fulltext retrieval of episodes (no vector; fulltext only)
-func (c *Client) searchEpisodes(query string, limit int) ([]EpisodeWithScore, error) {
-	res, err := c.graph.ROQuery(`CALL db.idx.fulltext.queryNodes('Episodic', $q) YIELD node, score
-		RETURN node, score LIMIT $limit`,
-		map[string]any{"q": escapeFTQuery(query), "limit": limit}, nil)
-	if err != nil {
-		return nil, err
-	}
-	out := []EpisodeWithScore{}
-	for res.Next() {
-		nVal, err := res.Record().GetByIndex(0)
-		if err != nil {
-			continue
-		}
-		n, ok := nVal.(*falkordb.Node)
-		if !ok {
-			continue
-		}
-		s, _ := res.Record().GetByIndex(1)
-		out = append(out, EpisodeWithScore{Episode: *episodeFromNode(n), Score: toFloat(s)})
-	}
-	return out, nil
-}
-
 // toFloat coerces a FalkorDB numeric result to float64
 func toFloat(v any) float64 {
 	switch x := v.(type) {
@@ -263,30 +266,4 @@ func toFloat(v any) float64 {
 	default:
 		return 0
 	}
-}
-
-// Search hybrid retrieval: entities + edges + episodes
-func (c *Client) Search(query string, opts SearchOpts) (*SearchResult, error) {
-	if opts.Limit <= 0 {
-		opts.Limit = 10
-	}
-	if opts.AsOf != "" {
-		var err error
-		if opts.AsOf, err = normalizeTime(opts.AsOf); err != nil {
-			return nil, err
-		}
-	}
-	entities, err := c.SearchEntities(query, opts.Limit)
-	if err != nil {
-		return nil, fmt.Errorf("entities: %w", err)
-	}
-	edges, err := c.searchEdgesFiltered(query, opts.Limit, opts.AsOf, opts.IncludeInvalid)
-	if err != nil {
-		return nil, fmt.Errorf("edges: %w", err)
-	}
-	episodes, err := c.searchEpisodes(query, opts.Limit)
-	if err != nil {
-		return nil, fmt.Errorf("episodes: %w", err)
-	}
-	return &SearchResult{Entities: entities, Edges: edges, Episodes: episodes}, nil
 }

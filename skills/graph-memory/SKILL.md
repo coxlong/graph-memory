@@ -18,24 +18,28 @@ gmem-cli schema show   # configured entity/edge types — read BEFORE writing
 
 ## Recalling memory
 
-Search before answering anything that depends on stored facts.
+Search before answering anything that depends on stored facts. Facts live on
+edges; entities are the anchors they connect.
 
 ```bash
-gmem-cli search --query "Alice team" --limit 10   # entities + facts + episodes
-gmem-cli entity search --query "Alice"            # entities only
-gmem-cli edge   search --query "works on"         # facts only
+gmem-cli edge   search --query "works on"         # facts (main recall path)
+gmem-cli entity search --query "Alice"            # entities / anchors
 ```
 
-Temporal state of facts:
+Narrow by type (configured schema types) and point in time:
 
+- `--type Person` or `--type MEMBER_OF,WORKS_ON`: filter by entity label / edge name.
+  Comma-separated; an unknown type simply matches nothing.
 - default: only facts valid **now**
-- `--as-of 2026-03-01T00:00:00Z` (top-level `search` only): facts valid at that moment
-- `--include-invalid`: include superseded facts (history)
+- `--as-of 2026-03-01T00:00:00Z` (edge search): facts valid at that moment
+- `--include-invalid` (edge search): include superseded facts (history)
 
 Usage rules:
 
 - `score` is a retrieval rank, not truth. Judge relevance yourself.
 - A miss is not proof of absence — retry with different query terms.
+- Provenance: an edge carries `episodes` (source episode uuids); `episode get`
+  or `episode list` retrieves the raw content a fact came from.
 - Fetch full records by uuid: `entity get`, `episode get`, `saga get`.
 
 ## Storing memory
@@ -61,7 +65,7 @@ Flow:
 | `schema show` | print configured entity & edge types |
 | `add` | episode + extracted entities + edges in one call |
 | `add-triplet` | a single fact (entities auto-deduped by name) |
-| `search` / `entity search` / `edge search` | recall; `--as-of`, `--include-invalid`, `--limit` |
+| `entity search` / `edge search` | recall; `--type`, `--as-of`, `--include-invalid`, `--limit` |
 | `episode get` / `episode list` | raw stored content |
 | `entity get` / `entity update` / `entity merge` | entity detail / deepen / dedup |
 | `edge upsert` / `edge invalidate` / `edge delete` | write / supersede / remove a fact |
