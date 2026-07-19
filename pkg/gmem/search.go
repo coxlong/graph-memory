@@ -248,8 +248,7 @@ func (c *Client) searchEdgesFiltered(query string, limit int, asOf string, types
 		}
 		res, err := c.graph.ROQuery(`CALL db.idx.fulltext.queryRelationships('RELATES_TO', $q) YIELD relationship, score
 			WITH relationship AS r, score WHERE `+filter+` AND `+typePred+`
-			MATCH (s:Entity)-[r]->(t)
-			RETURN r, s.uuid, t.uuid, score LIMIT $limit`,
+			RETURN r, startNode(r).uuid, endNode(r).uuid, score LIMIT $limit`,
 			fulltextParams, nil)
 		if err == nil {
 			fr := []string{}

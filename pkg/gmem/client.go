@@ -101,9 +101,9 @@ var indexQueries = []string{
 	"CREATE INDEX FOR ()-[e:HAS_MEMBER]-() ON (e.uuid)",
 	"CREATE INDEX FOR ()-[e:HAS_EPISODE]-() ON (e.uuid, e.group_id)",
 	"CREATE INDEX FOR ()-[e:NEXT_EPISODE]-() ON (e.uuid, e.group_id)",
-	"CALL db.idx.fulltext.createNodeIndex('Entity', 'name', 'summary', 'group_id')",
-	"CALL db.idx.fulltext.createNodeIndex('Episodic', 'content', 'source', 'source_description', 'group_id')",
-	"CALL db.idx.fulltext.createNodeIndex('Community', 'name')",
+	"CALL db.idx.fulltext.createNodeIndex({label:'Entity', language:'chinese'}, 'name', 'summary', 'group_id')",
+	"CALL db.idx.fulltext.createNodeIndex({label:'Episodic', language:'chinese'}, 'content', 'source', 'source_description', 'group_id')",
+	"CALL db.idx.fulltext.createNodeIndex({label:'Community', language:'chinese'}, 'name')",
 	"CREATE FULLTEXT INDEX FOR ()-[e:RELATES_TO]-() ON (e.name, e.fact, e.group_id)",
 }
 

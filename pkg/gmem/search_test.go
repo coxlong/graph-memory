@@ -186,3 +186,43 @@ func TestSearchEdgesMethod(t *testing.T) {
 		}
 	}
 }
+
+func TestSearchEdgesBM25Selectivity(t *testing.T) {
+	// Regression: the edge fulltext path must return only edges whose fact
+	// matches the query, not all edges (a MATCH-rebind bug previously returned
+	// every edge regardless of the fulltext query).
+	srv := newFakeEmbedServer(t)
+	defer srv.Close()
+	c := newTestClient(t, srv.URL)
+	a, _, _ := c.UpsertEntity(&Entity{Name: "SelAlice"}, false)
+	b, _, _ := c.UpsertEntity(&Entity{Name: "SelTeam"}, false)
+	g, _, _ := c.UpsertEntity(&Entity{Name: "SelGroup"}, false)
+	if _, err := c.UpsertEdge(&Edge{
+		Name: "MEMBER_OF", Fact: "SelAlice member of SelTeam",
+		SourceUUID: a.UUID, TargetUUID: b.UUID, ValidAt: "2026-01-01T00:00:00Z",
+	}, false); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.UpsertEdge(&Edge{
+		Name: "PART_OF", Fact: "SelTeam part of SelGroup",
+		SourceUUID: b.UUID, TargetUUID: g.UUID, ValidAt: "2026-01-01T00:00:00Z",
+	}, false); err != nil {
+		t.Fatal(err)
+	}
+	// "member" only appears in the first fact
+	res, err := c.SearchEdges("member", 10, "", nil, "bm25", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res) != 1 || res[0].Name != "MEMBER_OF" {
+		t.Fatalf("bm25 'member' should return only MEMBER_OF: %+v", res)
+	}
+	// "part" only appears in the second fact
+	res, err = c.SearchEdges("part", 10, "", nil, "bm25", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res) != 1 || res[0].Name != "PART_OF" {
+		t.Fatalf("bm25 'part' should return only PART_OF: %+v", res)
+	}
+}
