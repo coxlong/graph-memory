@@ -93,7 +93,8 @@ func (c *Client) Init() error {
 			continue
 		}
 		msg := strings.ToLower(err.Error())
-		if strings.Contains(msg, "already") || strings.Contains(msg, "noperm") {
+		// tolerate: index already exists, restricted user, or procedure not registered (older FalkorDB)
+		if strings.Contains(msg, "already") || strings.Contains(msg, "noperm") || strings.Contains(msg, "not registered") {
 			continue
 		}
 		return fmt.Errorf("init %q: %w", q, err)

@@ -28,7 +28,7 @@ func newTestClient(t *testing.T, embedURL string) *Client {
 		FalkorAddr:     addr,
 		FalkorUser:     os.Getenv("FALKORDB_TEST_USER"),
 		FalkorPassword: os.Getenv("FALKORDB_TEST_PASSWORD"),
-		Graph:          fmt.Sprintf("gmem_test_%d", time.Now().UnixNano()),
+		Graph:          fmt.Sprintf("test_gmem_%d", time.Now().UnixNano()),
 		EmbedBase:      embedURL,
 		EmbedKey:       "test",
 		EmbedModel:     "test-model",
@@ -65,8 +65,7 @@ func TestStatus(t *testing.T) {
 	defer srv.Close()
 	c := newTestClient(t, srv.URL)
 	st := c.Status()
-	if st.FalkorDB != "ok" || st.Embedding != "ok" {
+	if st.FalkorDB != "ok" || st.Embedding != "ok" || !st.IndexesOK {
 		t.Fatalf("bad status: %+v", st)
 	}
-	// IndexesOK may be false if the FalkorDB user lacks db.indexes() permission
 }
