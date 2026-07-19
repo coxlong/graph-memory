@@ -1,11 +1,13 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"log/slog"
 	"os"
 
 	"github.com/coxlong/graph-memory/pkg/gmem"
+	"github.com/redis/go-redis/v9"
 	"github.com/spf13/cobra"
 )
 
@@ -16,7 +18,14 @@ var rootCmd = &cobra.Command{
 	Short: "Graph memory CLI for agents (FalkorDB + graphiti schema)",
 }
 
+// quietRedisLogger silences go-redis internal pool logs; connection problems
+// are reported through our own wrapped errors instead.
+type quietRedisLogger struct{}
+
+func (quietRedisLogger) Printf(context.Context, string, ...interface{}) {}
+
 func init() {
+	redis.SetLogger(quietRedisLogger{})
 	rootCmd.PersistentFlags().StringVar(&groupIDFlag, "group-id", "", "group id (selects the FalkorDB graph; default from config)")
 }
 

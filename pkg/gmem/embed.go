@@ -1,7 +1,9 @@
 package gmem
 
 import (
+	"errors"
 	"fmt"
+	"net/url"
 
 	"resty.dev/v3"
 )
@@ -39,6 +41,11 @@ func (e *Embedder) Embed(text string) ([]float32, error) {
 		SetResult(&out).
 		Post("/embeddings")
 	if err != nil {
+		// strip the request URL (configured endpoint) from transport errors
+		var ue *url.Error
+		if errors.As(err, &ue) {
+			return nil, fmt.Errorf("embedding request: %w", ue.Err)
+		}
 		return nil, fmt.Errorf("embedding request: %w", err)
 	}
 	if resp.StatusCode() >= 400 {

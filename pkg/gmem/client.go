@@ -22,12 +22,19 @@ type Client struct {
 
 func NewClient(cfg *Config) (*Client, error) {
 	db, err := falkordb.FalkorDBNew(&falkordb.ConnectionOption{
-		Addr:     cfg.FalkorAddr,
-		Username: cfg.FalkorUser,
-		Password: cfg.FalkorPassword,
+		Addr:        cfg.FalkorAddr,
+		Username:    cfg.FalkorUser,
+		Password:    cfg.FalkorPassword,
+		MaxRetries:  -1, // fail fast: no retry storm on unreachable server
+		DialTimeout: 2 * time.Second,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("connect falkordb: %w", err)
+	}
+	pingCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := db.Conn.Ping(pingCtx).Err(); err != nil {
+		return nil, fmt.Errorf("falkordb unreachable at %s: %w", cfg.FalkorAddr, err)
 	}
 	// graphiti-aligned physical isolation: each group_id is a separate FalkorDB
 	// graph. The configured group_id is the graph name; --group-id selects another.
