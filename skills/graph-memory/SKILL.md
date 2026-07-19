@@ -30,6 +30,7 @@ Narrow by type (configured schema types) and point in time:
 
 - `--type Person` or `--type MEMBER_OF,WORKS_ON`: filter by entity label / edge name.
   Comma-separated; an unknown type simply matches nothing.
+- `--method hybrid|vector|bm25` (default `hybrid`)
 - default: only facts valid **now**
 - `--as-of 2026-03-01T00:00:00Z` (edge search): facts valid at that moment
 - `--include-invalid` (edge search): include superseded facts (history)

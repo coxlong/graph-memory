@@ -104,7 +104,7 @@ var indexQueries = []string{
 	"CALL db.idx.fulltext.createNodeIndex('Entity', 'name', 'summary', 'group_id')",
 	"CALL db.idx.fulltext.createNodeIndex('Episodic', 'content', 'source', 'source_description', 'group_id')",
 	"CALL db.idx.fulltext.createNodeIndex('Community', 'name')",
-	"CALL db.idx.fulltext.createRelationshipIndex('RELATES_TO', 'name', 'fact', 'group_id')",
+	"CREATE FULLTEXT INDEX FOR ()-[e:RELATES_TO]-() ON (e.name, e.fact, e.group_id)",
 }
 
 // Init creates indexes, idempotent: existing indexes are skipped.

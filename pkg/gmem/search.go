@@ -57,9 +57,19 @@ func entityTypePredicate(types []string) string {
 	return "any(t IN $types WHERE t IN labels(n))"
 }
 
+// useVector reports whether the vector recall path runs for the given method.
+// Empty or "hybrid" runs both paths; "bm25" skips the vector path.
+func useVector(method string) bool { return method != "bm25" }
+
+// useBM25 reports whether the fulltext (BM25) recall path runs for the given
+// method. Empty or "hybrid" runs both paths; "vector" skips the fulltext path.
+func useBM25(method string) bool { return method != "vector" }
+
 // SearchEntities vector ∪ fulltext retrieval of entities, optionally narrowed
 // to the given entity type names (node labels excluding the base "Entity").
-func (c *Client) SearchEntities(query string, limit int, types []string) ([]EntityWithScore, error) {
+// method selects the recall path: "" / "hybrid" (both, RRF-fused),
+// "vector" (vector only), "bm25" (fulltext only).
+func (c *Client) SearchEntities(query string, limit int, types []string, method string) ([]EntityWithScore, error) {
 	vec, err := c.Embed.Embed(query)
 	if err != nil {
 		return nil, err
@@ -69,48 +79,21 @@ func (c *Client) SearchEntities(query string, limit int, types []string) ([]Enti
 	typePred := entityTypePredicate(types)
 
 	// vector path
-	params := map[string]any{"vec": vecParam(vec), "limit": limit}
-	if len(types) > 0 {
-		params["types"] = types
-	}
-	res, err := c.graph.ROQuery(`MATCH (n:Entity)
-		WHERE n.name_embedding IS NOT NULL AND `+typePred+`
-		WITH n, (2 - vec.cosineDistance(n.name_embedding, vecf32($vec)))/2 AS score
-		WHERE score > 0.3
-		RETURN n, score ORDER BY score DESC LIMIT $limit`,
-		params, nil)
-	if err != nil {
-		return nil, err
-	}
-	vr := []string{}
-	for res.Next() {
-		nVal, err := res.Record().GetByIndex(0)
+	if useVector(method) {
+		params := map[string]any{"vec": vecParam(vec), "limit": limit}
+		if len(types) > 0 {
+			params["types"] = types
+		}
+		res, err := c.graph.ROQuery(`MATCH (n:Entity)
+			WHERE n.name_embedding IS NOT NULL AND `+typePred+`
+			WITH n, (2 - vec.cosineDistance(n.name_embedding, vecf32($vec)))/2 AS score
+			WHERE score > 0.3
+			RETURN n, score ORDER BY score DESC LIMIT $limit`,
+			params, nil)
 		if err != nil {
-			continue
+			return nil, err
 		}
-		n, ok := nVal.(*falkordb.Node)
-		if !ok {
-			continue
-		}
-		e := entityFromNode(n)
-		s, _ := res.Record().GetByIndex(1)
-		score := toFloat(s)
-		byID[e.UUID] = EntityWithScore{Entity: *e, Score: score}
-		vr = append(vr, e.UUID)
-	}
-	ranks = append(ranks, vr)
-
-	// fulltext path (tolerated if index procedure is unavailable)
-	fulltextParams := map[string]any{"q": escapeFTQuery(query), "limit": limit}
-	if len(types) > 0 {
-		fulltextParams["types"] = types
-	}
-	res, err = c.graph.ROQuery(`CALL db.idx.fulltext.queryNodes('Entity', $q) YIELD node, score
-		WITH node AS n, score WHERE `+typePred+`
-		RETURN n, score LIMIT $limit`,
-		fulltextParams, nil)
-	if err == nil {
-		fr := []string{}
+		vr := []string{}
 		for res.Next() {
 			nVal, err := res.Record().GetByIndex(0)
 			if err != nil {
@@ -123,12 +106,43 @@ func (c *Client) SearchEntities(query string, limit int, types []string) ([]Enti
 			e := entityFromNode(n)
 			s, _ := res.Record().GetByIndex(1)
 			score := toFloat(s)
-			if _, seen := byID[e.UUID]; !seen {
-				byID[e.UUID] = EntityWithScore{Entity: *e, Score: score}
-			}
-			fr = append(fr, e.UUID)
+			byID[e.UUID] = EntityWithScore{Entity: *e, Score: score}
+			vr = append(vr, e.UUID)
 		}
-		ranks = append(ranks, fr)
+		ranks = append(ranks, vr)
+	}
+
+	// fulltext path (tolerated if index procedure is unavailable)
+	if useBM25(method) {
+		fulltextParams := map[string]any{"q": escapeFTQuery(query), "limit": limit}
+		if len(types) > 0 {
+			fulltextParams["types"] = types
+		}
+		res, err := c.graph.ROQuery(`CALL db.idx.fulltext.queryNodes('Entity', $q) YIELD node, score
+			WITH node AS n, score WHERE `+typePred+`
+			RETURN n, score LIMIT $limit`,
+			fulltextParams, nil)
+		if err == nil {
+			fr := []string{}
+			for res.Next() {
+				nVal, err := res.Record().GetByIndex(0)
+				if err != nil {
+					continue
+				}
+				n, ok := nVal.(*falkordb.Node)
+				if !ok {
+					continue
+				}
+				e := entityFromNode(n)
+				s, _ := res.Record().GetByIndex(1)
+				score := toFloat(s)
+				if _, seen := byID[e.UUID]; !seen {
+					byID[e.UUID] = EntityWithScore{Entity: *e, Score: score}
+				}
+				fr = append(fr, e.UUID)
+			}
+			ranks = append(ranks, fr)
+		}
 	}
 
 	order := rrfFuse(ranks, 60)
@@ -172,18 +186,19 @@ func edgeTypePredicate(types []string) string {
 
 // SearchEdges vector ∪ fulltext retrieval of RELATES_TO edges with temporal
 // and type filtering. asOf (RFC3339) constrains to a point in time; types
-// narrows to the given semantic edge types (r.name).
-func (c *Client) SearchEdges(query string, limit int, asOf string, types []string, includeInvalid bool) ([]EdgeWithScore, error) {
+// narrows to the given semantic edge types (r.name). method selects the
+// recall path: "" / "hybrid" (both, RRF-fused), "vector", "bm25".
+func (c *Client) SearchEdges(query string, limit int, asOf string, types []string, method string, includeInvalid bool) ([]EdgeWithScore, error) {
 	if asOf != "" {
 		var err error
 		if asOf, err = normalizeTime(asOf); err != nil {
 			return nil, err
 		}
 	}
-	return c.searchEdgesFiltered(query, limit, asOf, types, includeInvalid)
+	return c.searchEdgesFiltered(query, limit, asOf, types, method, includeInvalid)
 }
 
-func (c *Client) searchEdgesFiltered(query string, limit int, asOf string, types []string, includeInvalid bool) ([]EdgeWithScore, error) {
+func (c *Client) searchEdgesFiltered(query string, limit int, asOf string, types []string, method string, includeInvalid bool) ([]EdgeWithScore, error) {
 	vec, err := c.Embed.Embed(query)
 	if err != nil {
 		return nil, err
@@ -194,55 +209,62 @@ func (c *Client) searchEdgesFiltered(query string, limit int, asOf string, types
 	ranks := [][]string{}
 
 	// vector path
-	params := map[string]any{"vec": vecParam(vec), "limit": limit}
-	for k, v := range fparams {
-		params[k] = v
-	}
-	if len(types) > 0 {
-		params["types"] = types
-	}
-	res, err := c.graph.ROQuery(`MATCH (s:Entity)-[r:RELATES_TO]->(t)
-		WHERE r.fact_embedding IS NOT NULL AND `+filter+` AND `+typePred+`
-		WITH r, s, t, (2 - vec.cosineDistance(r.fact_embedding, vecf32($vec)))/2 AS score
-		WHERE score > 0.3
-		RETURN r, s.uuid, t.uuid, score ORDER BY score DESC LIMIT $limit`, params, nil)
-	if err != nil {
-		return nil, err
-	}
-	vr := []string{}
-	for res.Next() {
-		e := edgeFromRecord(res.Record())
-		if e == nil {
-			continue
+	if useVector(method) {
+		params := map[string]any{"vec": vecParam(vec), "limit": limit}
+		for k, v := range fparams {
+			params[k] = v
 		}
-		byID[e.UUID] = *e
-		vr = append(vr, e.UUID)
-	}
-	ranks = append(ranks, vr)
-
-	// fulltext path (tolerated if relationship index procedure is unavailable)
-	fulltextParams := map[string]any{"q": escapeFTQuery(query), "limit": limit, "asOf": asOf}
-	if len(types) > 0 {
-		fulltextParams["types"] = types
-	}
-	res, err = c.graph.ROQuery(`CALL db.idx.fulltext.queryRelationships('RELATES_TO', $q) YIELD relationship, score
-		WITH relationship AS r, score WHERE `+filter+` AND `+typePred+`
-		MATCH (s:Entity)-[r]->(t)
-		RETURN r, s.uuid, t.uuid, score LIMIT $limit`,
-		fulltextParams, nil)
-	if err == nil {
-		fr := []string{}
+		if len(types) > 0 {
+			params["types"] = types
+		}
+		res, err := c.graph.ROQuery(`MATCH (s:Entity)-[r:RELATES_TO]->(t)
+			WHERE r.fact_embedding IS NOT NULL AND `+filter+` AND `+typePred+`
+			WITH r, s, t, (2 - vec.cosineDistance(r.fact_embedding, vecf32($vec)))/2 AS score
+			WHERE score > 0.3
+			RETURN r, s.uuid, t.uuid, score ORDER BY score DESC LIMIT $limit`, params, nil)
+		if err != nil {
+			return nil, err
+		}
+		vr := []string{}
 		for res.Next() {
 			e := edgeFromRecord(res.Record())
 			if e == nil {
 				continue
 			}
-			if _, seen := byID[e.UUID]; !seen {
-				byID[e.UUID] = *e
-			}
-			fr = append(fr, e.UUID)
+			byID[e.UUID] = *e
+			vr = append(vr, e.UUID)
 		}
-		ranks = append(ranks, fr)
+		ranks = append(ranks, vr)
+	}
+
+	// fulltext path (tolerated if relationship index procedure is unavailable)
+	if useBM25(method) {
+		fulltextParams := map[string]any{"q": escapeFTQuery(query), "limit": limit}
+		for k, v := range fparams {
+			fulltextParams[k] = v
+		}
+		if len(types) > 0 {
+			fulltextParams["types"] = types
+		}
+		res, err := c.graph.ROQuery(`CALL db.idx.fulltext.queryRelationships('RELATES_TO', $q) YIELD relationship, score
+			WITH relationship AS r, score WHERE `+filter+` AND `+typePred+`
+			MATCH (s:Entity)-[r]->(t)
+			RETURN r, s.uuid, t.uuid, score LIMIT $limit`,
+			fulltextParams, nil)
+		if err == nil {
+			fr := []string{}
+			for res.Next() {
+				e := edgeFromRecord(res.Record())
+				if e == nil {
+					continue
+				}
+				if _, seen := byID[e.UUID]; !seen {
+					byID[e.UUID] = *e
+				}
+				fr = append(fr, e.UUID)
+			}
+			ranks = append(ranks, fr)
+		}
 	}
 
 	order := rrfFuse(ranks, 60)

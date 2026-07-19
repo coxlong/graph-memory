@@ -80,7 +80,7 @@ endpoint types; `--lenient` skips validation per command.
 | `schema show` | print configured entity & edge types |
 | `add` | episode + extracted entities + edges in one call |
 | `add-triplet` | a single fact (entities deduped by name) |
-| `entity search` / `edge search` | hybrid vector+fulltext (RRF); `--type`, `--as-of`, `--include-invalid`, `--limit` |
+| `entity search` / `edge search` | hybrid vector+fulltext (RRF); `--method`, `--type`, `--as-of`, `--include-invalid`, `--limit` |
 | `episode get|list` | episode operations |
 | `entity get|update|merge` | entity operations |
 | `edge upsert|invalidate|delete` | fact edges with temporal invalidation |

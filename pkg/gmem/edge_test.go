@@ -107,12 +107,12 @@ func TestUpsertEdgeExpiredAt(t *testing.T) {
 		t.Fatalf("expired_at not persisted: %q", got.ExpiredAt)
 	}
 	// The edge expired 2026-06; default search at now(2026-07) must hide it.
-	res, _ := c.SearchEdges("member of ExpTeam", 10, "", nil, false)
+	res, _ := c.SearchEdges("member of ExpTeam", 10, "", nil, "", false)
 	if len(res) != 0 {
 		t.Fatalf("expired edge should be hidden by default: %v", res)
 	}
 	// as-of before the expiry: edge active
-	res, err = c.searchEdgesFiltered("member of ExpTeam", 10, "2026-05-01T00:00:00Z", nil, false)
+	res, err = c.searchEdgesFiltered("member of ExpTeam", 10, "2026-05-01T00:00:00Z", nil, "", false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -120,7 +120,7 @@ func TestUpsertEdgeExpiredAt(t *testing.T) {
 		t.Fatalf("as-of before expiry should find edge: %v", res)
 	}
 	// includeInvalid returns it regardless
-	res, _ = c.SearchEdges("member of ExpTeam", 10, "", nil, true)
+	res, _ = c.SearchEdges("member of ExpTeam", 10, "", nil, "", true)
 	if len(res) != 1 {
 		t.Fatalf("includeInvalid should find expired edge: %v", res)
 	}
