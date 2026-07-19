@@ -8,14 +8,14 @@ import (
 )
 
 type Config struct {
-	FalkorAddr     string `yaml:"falkordb_addr"`
-	FalkorUser     string `yaml:"falkordb_user"`
-	FalkorPassword string `yaml:"falkordb_password"`
-	GroupID        string `yaml:"group_id"`
-	EmbedBase      string `yaml:"embedding_api_base"`
-	EmbedKey       string `yaml:"embedding_api_key"`
-	EmbedModel     string `yaml:"embedding_model"`
-	SchemaPath     string `yaml:"schema_path"`
+	FalkorAddr     string  `yaml:"falkordb_addr"`
+	FalkorUser     string  `yaml:"falkordb_user"`
+	FalkorPassword string  `yaml:"falkordb_password"`
+	GroupID        string  `yaml:"group_id"`
+	EmbedBase      string  `yaml:"embedding_api_base"`
+	EmbedKey       string  `yaml:"embedding_api_key"`
+	EmbedModel     string  `yaml:"embedding_model"`
+	Schema         *Schema `yaml:"schema"` // optional inline type schema (entity/edge validation)
 }
 
 // defaultConfigPath returns the default config file path ~/.gmem.yaml, or ""
@@ -53,7 +53,6 @@ func LoadConfig(configPath string) (*Config, error) {
 		"EMBEDDING_API_BASE": &cfg.EmbedBase,
 		"EMBEDDING_API_KEY":  &cfg.EmbedKey,
 		"EMBEDDING_MODEL":    &cfg.EmbedModel,
-		"GMEM_SCHEMA":        &cfg.SchemaPath,
 	}
 	for k, ptr := range env {
 		if v := os.Getenv(k); v != "" {

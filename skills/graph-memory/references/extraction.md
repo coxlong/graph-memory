@@ -74,6 +74,9 @@ Bad:  "leash", "cycling", "coat" (too generic — keep the qualifier)
 
 - Run `gmem-cli schema show` first. If a schema is configured, use exactly those
   entity labels and required attributes. With no schema, labels are free-form.
+- Under a configured schema, new entities must carry a configured label —
+  `add-triplet` (which creates untyped entities) is only for facts between
+  **existing** typed entities; for new entities use `add` with typed `--entities`.
 - Attribute values must be one of:
   (a) a value copied or directly normalized from the content,
   (b) the existing value on the entity (preserved unchanged),

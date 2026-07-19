@@ -2,12 +2,9 @@ package gmem
 
 import (
 	"fmt"
-	"os"
 	"regexp"
 	"slices"
 	"strings"
-
-	"gopkg.in/yaml.v3"
 )
 
 type AttributeDef struct {
@@ -29,18 +26,6 @@ type EdgeTypeDef struct {
 type Schema struct {
 	EntityTypes map[string]EntityTypeDef `yaml:"entity_types" json:"entity_types,omitempty"`
 	EdgeTypes   map[string]EdgeTypeDef   `yaml:"edge_types" json:"edge_types,omitempty"`
-}
-
-func LoadSchema(path string) (*Schema, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return nil, err
-	}
-	var s Schema
-	if err := yaml.Unmarshal(data, &s); err != nil {
-		return nil, fmt.Errorf("parse schema: %w", err)
-	}
-	return &s, nil
 }
 
 var labelRe = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)

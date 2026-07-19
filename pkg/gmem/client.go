@@ -39,12 +39,8 @@ func NewClient(cfg *Config) (*Client, error) {
 		Embed:     NewEmbedder(cfg.EmbedBase, cfg.EmbedKey, cfg.EmbedModel),
 	}
 	c.graph = db.SelectGraph(c.graphName)
-	if cfg.SchemaPath != "" {
-		s, err := LoadSchema(cfg.SchemaPath)
-		if err != nil {
-			return nil, err
-		}
-		c.Schema = s
+	if cfg.Schema != nil {
+		c.Schema = cfg.Schema
 	} else {
 		c.Schema = &Schema{}
 	}

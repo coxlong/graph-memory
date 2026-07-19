@@ -51,12 +51,17 @@ group_id: default             # default group; each group_id is a separate Falko
 embedding_api_base: https://api.openai.com/v1
 embedding_api_key: ...
 embedding_model: text-embedding-3-small
-schema_path: /path/to/gmem.yaml   # optional type schema (entity/edge validation)
+schema:                       # optional inline type schema (entity/edge validation)
+  entity_types: ...
+  edge_types: ...
 ```
+
+See [`gmem.example.yaml`](gmem.example.yaml) for a complete annotated example
+including a full schema.
 
 The same keys can be set as env vars: `FALKORDB_ADDR`, `FALKORDB_USER`,
 `FALKORDB_PASSWORD`, `GMEM_GROUP_ID`, `EMBEDDING_API_BASE`,
-`EMBEDDING_API_KEY`, `EMBEDDING_MODEL`, `GMEM_SCHEMA`.
+`EMBEDDING_API_KEY`, `EMBEDDING_MODEL`.
 
 `--group-id <id>` overrides the configured default on any command and selects a
 different FalkorDB graph (the graph is named by the group id itself). Groups are
@@ -64,7 +69,7 @@ different FalkorDB graph (the graph is named by the group id itself). Groups are
 another. Run `gmem-cli --group-id <id> init` once per new group to create its
 indexes.
 
-A `schema_path` schema enables validating required/enum attributes and edge
+A configured `schema` enables validating required/enum attributes and edge
 endpoint types; `--lenient` skips validation per command.
 
 ## Commands

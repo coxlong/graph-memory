@@ -113,3 +113,38 @@ func TestDeleteNode(t *testing.T) {
 		t.Fatal("node should be gone")
 	}
 }
+
+// Under a configured schema, referencing an existing entity by name (empty
+// labels) must succeed; creating a new entity without a configured type fails.
+func TestUpsertEntitySchemaExistingVsNew(t *testing.T) {
+	srv := newFakeEmbedServer(t)
+	defer srv.Close()
+	c := newTestClient(t, srv.URL)
+	c.Schema = &Schema{EntityTypes: map[string]EntityTypeDef{
+		"Person": {Attributes: map[string]AttributeDef{"role": {Type: "string", Required: true}}},
+	}}
+
+	// create a typed entity
+	if _, _, err := c.UpsertEntity(&Entity{
+		Name: "TypedAlice", Labels: []string{"Person"},
+		Attributes: map[string]any{"role": "be"},
+	}, false); err != nil {
+		t.Fatal(err)
+	}
+	// reference it by name with no labels: OK, and deduped
+	got, created, err := c.UpsertEntity(&Entity{Name: "TypedAlice"}, false)
+	if err != nil || created {
+		t.Fatalf("existing entity by name: %v created=%v", err, created)
+	}
+	if !contains(got.Labels, "Person") {
+		t.Fatalf("labels lost: %v", got.Labels)
+	}
+	// new entity without a configured type: rejected
+	if _, _, err := c.UpsertEntity(&Entity{Name: "UntypedBob"}, false); err == nil {
+		t.Fatal("expected schema rejection for untyped new entity")
+	}
+	// new typed entity missing a required attribute: rejected
+	if _, _, err := c.UpsertEntity(&Entity{Name: "NoRole", Labels: []string{"Person"}}, false); err == nil {
+		t.Fatal("expected missing required attribute error")
+	}
+}

@@ -40,25 +40,16 @@ func vecParam(f []float32) []interface{} {
 	return out
 }
 
-// UpsertEntity MERGEs by (name, group_id); returns entity and whether it was newly created
+// UpsertEntity MERGEs by (name, group_id); returns entity and whether it was newly created.
+// Schema validation applies only on create: referencing an existing entity by name
+// (empty labels) never fails validation, and input attributes are ignored for it.
 func (c *Client) UpsertEntity(e *Entity, lenient bool) (*Entity, bool, error) {
 	if err := ValidateLabels(e.Labels); err != nil {
 		return nil, false, err
 	}
-	if err := c.Schema.ValidateEntity(e.Labels, e.Attributes, lenient); err != nil {
-		return nil, false, err
-	}
 	gid := c.GroupID(e.GroupID)
-	emb, err := c.Embed.Embed(e.Name)
-	if err != nil {
-		return nil, false, err
-	}
 	if e.UUID == "" {
 		e.UUID = newUUID()
-	}
-	attrs, err := mapToJSON(e.Attributes)
-	if err != nil {
-		return nil, false, err
 	}
 	// try find existing entity
 	res, err := c.graph.ROQuery(`MATCH (n:Entity {name: $name, group_id: $gid}) RETURN n LIMIT 1`,
@@ -77,7 +68,18 @@ func (c *Client) UpsertEntity(e *Entity, lenient bool) (*Entity, bool, error) {
 		}
 		return entityFromNode(n), false, nil
 	}
-	// create new
+	// create new — validate against the schema first
+	if err := c.Schema.ValidateEntity(e.Labels, e.Attributes, lenient); err != nil {
+		return nil, false, err
+	}
+	emb, err := c.Embed.Embed(e.Name)
+	if err != nil {
+		return nil, false, err
+	}
+	attrs, err := mapToJSON(e.Attributes)
+	if err != nil {
+		return nil, false, err
+	}
 	_, err = c.graph.Query(`CREATE (n:Entity {
 		uuid: $uuid, name: $name, group_id: $gid, summary: $summary,
 		attributes: $attrs, created_at: $created_at

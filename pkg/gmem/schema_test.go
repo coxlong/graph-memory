@@ -1,9 +1,9 @@
 package gmem
 
 import (
-	"os"
-	"path/filepath"
 	"testing"
+
+	"gopkg.in/yaml.v3"
 )
 
 const testSchemaYAML = `
@@ -24,15 +24,11 @@ edge_types:
 
 func loadTestSchema(t *testing.T) *Schema {
 	t.Helper()
-	p := filepath.Join(t.TempDir(), "gmem.yaml")
-	if err := os.WriteFile(p, []byte(testSchemaYAML), 0o644); err != nil {
+	var s Schema
+	if err := yaml.Unmarshal([]byte(testSchemaYAML), &s); err != nil {
 		t.Fatal(err)
 	}
-	s, err := LoadSchema(p)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return s
+	return &s
 }
 
 func TestValidateEntityOK(t *testing.T) {

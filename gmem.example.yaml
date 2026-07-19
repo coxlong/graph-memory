@@ -1,23 +1,79 @@
-# Example gmem type schema. Set `schema_path` in ~/.gmem.yaml (or GMEM_SCHEMA env)
-# to point at this file. Connection settings (falkordb_addr, group_id, embedding_*)
-# belong in ~/.gmem.yaml, not here.
-# Without a schema, gmem-cli performs no type validation (free-form entities/edges).
+# Complete example of ~/.gmem.yaml — the gmem-cli configuration file.
+# Copy to ~/.gmem.yaml and edit. Every key is optional; defaults are shown.
+# Environment variables override the file: FALKORDB_ADDR, FALKORDB_USER,
+# FALKORDB_PASSWORD, GMEM_GROUP_ID, EMBEDDING_API_BASE, EMBEDDING_API_KEY,
+# EMBEDDING_MODEL.
 
-entity_types:
-  Person:
-    description: "A real person"
-    attributes:
-      role: { type: string, required: true }
-      team: { type: string }
-  Project:
-    attributes:
-      status: { type: "enum:active|paused|done", required: true }
-      repo: { type: string }
+# --- Connection -------------------------------------------------------------
+falkordb_addr: localhost:6379
+falkordb_user: ""                # optional
+falkordb_password: ""            # optional
 
-edge_types:
-  WORKS_ON:
-    source: [Person]
-    target: [Project]
-  MEMBER_OF:
-    source: [Person]
-    target: [Project]
+# Default group. Each group_id is a separate, physically isolated FalkorDB
+# graph (the graph is named by the group id). Override per command with
+# the global flag: gmem-cli --group-id <id> ...
+group_id: default
+
+# --- Embeddings (OpenAI-compatible API) --------------------------------------
+embedding_api_base: https://api.openai.com/v1
+embedding_api_key: ""
+embedding_model: text-embedding-3-small
+
+# --- Type schema (optional) ---------------------------------------------------
+# Validates writes (add / add-triplet / edge upsert). Omit the whole section
+# for free-form mode (no validation). `--lenient` skips validation per call.
+# `gmem-cli schema show` prints this section as seen by the CLI.
+#
+# Graph structure the schema governs:
+#   Nodes:  Episodic (raw episodes), Entity (multi-label, typed here),
+#           Community, Saga
+#   Edges:  MENTIONS (Episodic→Entity, automatic),
+#           RELATES_TO (Entity→Entity, relation names typed here),
+#           HAS_MEMBER (Community→Entity), HAS_EPISODE (Saga→Episodic),
+#           NEXT_EPISODE (Episodic→Episodic)
+# Only Entity labels and RELATES_TO relation names are validated; the other
+# node/edge types are system-managed.
+schema:
+  entity_types:
+    Person:
+      description: "A real person"
+      attributes:
+        role: { type: string }            # e.g. "backend engineer"
+        team: { type: string }
+    Project:
+      description: "A project, product, or codebase"
+      attributes:
+        status: { type: "enum:active|paused|done", required: true }
+        repo: { type: string }
+    Organization:
+      description: "A company, team, or institution"
+      attributes:
+        industry: { type: string }
+    Location:
+      description: "A place: city, office, site"
+    Topic:
+      description: "A subject or area of knowledge"
+
+  edge_types:
+    WORKS_ON:
+      description: "Person works on a Project"
+      source: [Person]
+      target: [Project]
+    MEMBER_OF:
+      description: "Person belongs to a Project or Organization"
+      source: [Person]
+      target: [Project, Organization]
+    EMPLOYED_BY:
+      source: [Person]
+      target: [Organization]
+    KNOWS:
+      source: [Person]
+      target: [Person]
+    LOCATED_IN:
+      source: [Person, Organization, Project]
+      target: [Location]
+    PART_OF:
+      source: [Project]
+      target: [Project, Organization]
+    RELATED_TO:
+      description: "Fallback relation when nothing more specific fits"
