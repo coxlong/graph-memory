@@ -91,6 +91,101 @@ func TestAddTriplet(t *testing.T) {
 	}
 }
 
+// TestAddPreflightAbortsBeforeWrites: every parameter-validation failure must
+// abort before the episode is created, leaving zero nodes behind.
+func TestAddPreflightAbortsBeforeWrites(t *testing.T) {
+	srv := newFakeEmbedServer(t)
+	defer srv.Close()
+	c := newTestClient(t, srv.URL)
+
+	cases := []struct {
+		name string
+		in   *AddInput
+	}{
+		{"bad episode source", &AddInput{
+			Episode: &Episode{Content: "x", Source: "bogus"},
+		}},
+		{"bad episode valid_at", &AddInput{
+			Episode: &Episode{Content: "x", Source: "text", ValidAt: "not-a-time"},
+		}},
+		{"bad entity label", &AddInput{
+			Episode:  &Episode{Content: "x", Source: "text"},
+			Entities: []AddEntityInput{{Name: "E1", Labels: []string{"bad label!"}}},
+		}},
+		{"bad edge valid_at", &AddInput{
+			Episode:  &Episode{Content: "x", Source: "text"},
+			Entities: []AddEntityInput{{Name: "E1"}, {Name: "E2"}},
+			Edges:    []AddEdgeInput{{Source: "E1", Target: "E2", Name: "KNOWS", Fact: "f", ValidAt: "garbage"}},
+		}},
+		{"bad edge expired_at", &AddInput{
+			Episode:  &Episode{Content: "x", Source: "text"},
+			Entities: []AddEntityInput{{Name: "E1"}, {Name: "E2"}},
+			Edges:    []AddEdgeInput{{Source: "E1", Target: "E2", Name: "KNOWS", Fact: "f", ExpiredAt: "garbage"}},
+		}},
+	}
+	for _, tc := range cases {
+		if _, err := c.Add(tc.in); err == nil {
+			t.Errorf("%s: want error, got nil", tc.name)
+		}
+	}
+
+	// nothing was written: no episodes, no entities, no edges
+	for _, q := range []string{
+		`MATCH (n:Episodic) RETURN count(n)`,
+		`MATCH (n:Entity) RETURN count(n)`,
+		`MATCH ()-[r]->() RETURN count(r)`,
+	} {
+		res, err := c.graph.ROQuery(q, nil, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		res.Next()
+		v, _ := res.Record().GetByIndex(0)
+		if n, _ := v.(int64); n != 0 {
+			t.Errorf("%s: want 0, got %d", q, n)
+		}
+	}
+}
+
+// TestAddPreflightEdgeSchema: with a configured schema, an edge violating
+// source/target constraints aborts before any write.
+func TestAddPreflightEdgeSchema(t *testing.T) {
+	srv := newFakeEmbedServer(t)
+	defer srv.Close()
+	c := newTestClient(t, srv.URL)
+	c.Schema = &Schema{
+		EntityTypes: map[string]EntityTypeDef{
+			"Person": {},
+			"City":   {},
+		},
+		EdgeTypes: map[string]EdgeTypeDef{
+			"LIVES_IN": {Source: []string{"Person"}, Target: []string{"City"}},
+		},
+	}
+
+	// City -> Person violates LIVES_IN; must abort with nothing written
+	_, err := c.Add(&AddInput{
+		Episode: &Episode{Content: "x", Source: "text"},
+		Entities: []AddEntityInput{
+			{Name: "Shanghai", Labels: []string{"City"}},
+			{Name: "Bob", Labels: []string{"Person"}},
+		},
+		Edges: []AddEdgeInput{{Source: "Shanghai", Target: "Bob", Name: "LIVES_IN", Fact: "bad direction"}},
+	})
+	if err == nil {
+		t.Fatal("want schema error, got nil")
+	}
+	res, err := c.graph.ROQuery(`MATCH (n) RETURN count(n)`, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res.Next()
+	v, _ := res.Record().GetByIndex(0)
+	if n, _ := v.(int64); n != 0 {
+		t.Fatalf("want 0 nodes, got %d", n)
+	}
+}
+
 func TestAddSagaLinkage(t *testing.T) {
 	srv := newFakeEmbedServer(t)
 	defer srv.Close()

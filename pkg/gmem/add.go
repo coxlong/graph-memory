@@ -33,9 +33,92 @@ type AddResult struct {
 	EdgeUUIDs   []string          `json:"edge_uuids"`
 }
 
+// validateAddInput pre-checks every input parameter before any write.
+// Parameter errors abort before the episode is created, so a bad batch never
+// leaves partial writes. DB errors (embedding, network) can still fail mid-way.
+func (c *Client) validateAddInput(in *AddInput) error {
+	gid := c.GroupID(in.GroupID)
+
+	// episode: source + valid_at (mirrors CreateEpisode checks)
+	if !validSources[in.Episode.Source] {
+		return fmt.Errorf("episode: invalid source %q (message|text|json)", in.Episode.Source)
+	}
+	if _, err := normalizeTime(in.Episode.ValidAt); err != nil {
+		return fmt.Errorf("episode: %w", err)
+	}
+
+	// entities: labels safe + schema-valid for the ones declared in this batch
+	declared := map[string]AddEntityInput{}
+	for _, e := range in.Entities {
+		if err := ValidateLabels(e.Labels); err != nil {
+			return fmt.Errorf("entity %q: %w", e.Name, err)
+		}
+		if err := c.Schema.ValidateEntity(e.Labels, e.Attributes, in.Lenient); err != nil {
+			return fmt.Errorf("entity %q: %w", e.Name, err)
+		}
+		declared[e.Name] = e
+	}
+
+	// edges: time formats + schema. Endpoint labels come from the batch when
+	// declared there, else from the existing entity in the graph.
+	labelsOf := func(name string) ([]string, error) {
+		if e, ok := declared[name]; ok {
+			return e.Labels, nil
+		}
+		res, err := c.graph.ROQuery(`MATCH (n:Entity {name: $name, group_id: $gid}) RETURN labels(n) LIMIT 1`,
+			map[string]any{"name": name, "gid": gid}, nil)
+		if err != nil {
+			return nil, err
+		}
+		if !res.Next() {
+			return nil, nil // entity will be created with no labels; ValidateEdge will reject if schema requires them
+		}
+		v, err := res.Record().GetByIndex(0)
+		if err != nil {
+			return nil, err
+		}
+		raw, ok := v.([]any)
+		if !ok {
+			return nil, fmt.Errorf("unexpected labels type for %q", name)
+		}
+		labels := make([]string, 0, len(raw))
+		for _, l := range raw {
+			if s, ok := l.(string); ok {
+				labels = append(labels, s)
+			}
+		}
+		return labels, nil
+	}
+	for _, ei := range in.Edges {
+		if _, err := normalizeTime(ei.ValidAt); err != nil {
+			return fmt.Errorf("edge %q: valid_at: %w", ei.Name, err)
+		}
+		if _, err := normalizeTime(ei.ExpiredAt); err != nil {
+			return fmt.Errorf("edge %q: expired_at: %w", ei.Name, err)
+		}
+		srcLabels, err := labelsOf(ei.Source)
+		if err != nil {
+			return fmt.Errorf("edge %q: source %q: %w", ei.Name, ei.Source, err)
+		}
+		tgtLabels, err := labelsOf(ei.Target)
+		if err != nil {
+			return fmt.Errorf("edge %q: target %q: %w", ei.Name, ei.Target, err)
+		}
+		if err := c.Schema.ValidateEdge(ei.Name, srcLabels, tgtLabels, in.Lenient); err != nil {
+			return fmt.Errorf("edge %q: %w", ei.Name, err)
+		}
+	}
+	return nil
+}
+
 // Add writes a complete memory in one call: episode + entities + MENTIONS + RELATES_TO.
 // Not transactional; upserts are idempotent so a failed retry is safe.
+// All parameters are validated before any write; only DB/embedding failures
+// can leave partial writes.
 func (c *Client) Add(in *AddInput) (*AddResult, error) {
+	if err := c.validateAddInput(in); err != nil {
+		return nil, err
+	}
 	gid := c.GroupID(in.GroupID)
 	in.Episode.GroupID = gid
 	ep, err := c.CreateEpisode(in.Episode)
