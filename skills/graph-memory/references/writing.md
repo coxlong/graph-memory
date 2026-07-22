@@ -1,4 +1,4 @@
-# Writing to memory — extraction guide
+# Writing to memory
 
 Read this before writing to the graph. `gmem-cli` persists what you give it
 verbatim; extraction quality is entirely your responsibility. These principles are
@@ -12,11 +12,14 @@ truth) + the entities and facts you extract from it.
 - `--source`: `message` (a conversation turn), `text` (document/prose),
   `json` (a structured record).
 - `--content`: the raw text. Do not pre-summarize — the episode is the evidence.
-- `--valid-at`: when the event happened (default: now).
+- `--valid-at`: when the event happened (default: unset).
 - Keep one episode to one coherent event or message. Don't dump a whole session
   into a single episode.
 
-`add` returns `{episode_uuid, entities: {name -> uuid}, edge_uuids}`.
+`add` returns `{episode_uuid, entities: {name -> uuid}, edge_uuids, edges}`.
+`edges[i]` corresponds to `--edges[i]`: on a real write it carries `edge_uuid`
+and `merged` (true when the edge was an attribution merge via `duplicate_of`);
+with `--dry-run` it carries `candidates` instead and nothing is written.
 
 ## 2. Entity extraction
 
@@ -130,19 +133,29 @@ Entities:
   near-duplicates ("NYC" vs "New York City"), merge them:
   `gmem-cli entity merge --from <dup-uuid> --to <canonical-uuid>`.
 
-Facts — before writing a new fact, check what exists (`edge search`):
+Facts — `gmem-cli add --dry-run` returns `edges[].candidates` for every edge:
+existing edges with the same source, target, and relation name, invalidated ones
+included. Judge each candidate before the real write:
 
-- **DUPLICATE** (identical factual information): skip — do not write it again.
-- **CONTRADICTION** (same relationship, updated content — "works as a software
-  engineer" vs "works as a senior engineer"): invalidate the old fact, then write
-  the new one:
+- **DUPLICATE** (identical factual information): do not create a parallel edge.
+  Set `"duplicate_of": "<candidate uuid>"` on that edge in the real `add` so
+  your episode is appended to the existing edge's `episodes` attribution:
   ```bash
-  gmem-cli edge invalidate --uuid <old-edge-uuid> --invalid-at <when it stopped being true>
-  gmem-cli add-triplet --source Alice --name WORKS_AS --fact "Alice works as a senior engineer" --target "Acme Corp"
+  gmem-cli add-triplet --source Alice --name WORKS_AS --fact "..." --target "Acme Corp" \
+    --duplicate-of <existing-edge-uuid> [--episode-uuid <ep>]
+  ```
+- **CONTRADICTION** (same relationship, updated content — "works as a software
+  engineer" vs "works as a senior engineer"): set `"invalidate": ["<old-uuid>"]`
+  on that edge. The old edge is invalidated (`invalid_at` = now) and the new one
+  written in the same `add` call. If the fact stopped being true at an earlier
+  time you know, invalidate it yourself first so history gets the right
+  timestamp, then write without the `invalidate` field:
+  ```bash
+  gmem-cli edge invalidate --uuid <old-uuid> --invalid-at <when it stopped being true>
   ```
   Never update an edge's fact in place — facts are immutable; history is kept.
 - **DIFFERENT events** ("ran 5 miles Tuesday" vs "ran 3 miles Wednesday"):
-  neither duplicate nor contradiction — both coexist.
+  neither duplicate nor contradiction — both coexist, no disposition.
 
 ## 7. Summaries
 
@@ -174,14 +187,38 @@ BAD:  "Jordan mentioned moving the deployment date. Priya discussed updating
 
 ## 8. Write workflows
 
+Every write follows the same flow:
+
+1. `gmem-cli schema show` — use configured types if present.
+2. Extract entities + facts from the content (per §2–§5).
+3. `gmem-cli add --dry-run ...` — preflight: validates all inputs and returns
+   `edges[].candidates` (existing edges with the same source, target, and
+   relation name, invalidated ones included). `edges[i]` matches `--edges[i]`.
+   Zero writes.
+4. Judge each candidate (§6) and set dispositions (`duplicate_of` / `invalidate`)
+   on the affected edges.
+5. `gmem-cli add ...` (same args, no `--dry-run`) — episode + entities + edges
+   written with your dispositions applied. Never skip the dry-run: it exposes
+   duplicates and contradictions you would otherwise create blindly.
+
 New episode with entities and facts (the common case):
 
 ```bash
-gmem-cli add --content "Alice joined TeamB as backend engineer" --source message \
+# 1. preflight: validate + see duplicates/contradictions (zero writes)
+gmem-cli add --content "Alice joined TeamB as backend engineer" --source message --dry-run \
   --entities '[{"name":"Alice","labels":["Person"],"summary":"backend engineer","attributes":{"role":"backend"}},
                {"name":"TeamB","labels":["Project"]}]' \
   --edges '[{"source":"Alice","target":"TeamB","name":"MEMBER_OF",
              "fact":"Alice is a backend engineer on TeamB","valid_at":"2026-07-19T00:00:00Z"}]'
+
+# 2. real write — apply dispositions from the candidates you reviewed.
+#    duplicate_of and invalidate are mutually exclusive per edge:
+#    a duplicate is never written, so there is nothing to invalidate.
+gmem-cli add --content "Alice joined TeamB as backend engineer" --source message \
+  --entities '[...]' \
+  --edges '[{"source":"Alice","target":"TeamB","name":"MEMBER_OF","fact":"..."}]'
+#   add  "duplicate_of": "<uuid>"  to an edge whose candidate was a DUPLICATE
+#   add  "invalidate": ["<uuid>"]  to an edge whose candidate was a CONTRADICTION
 ```
 
 Single fact (entities auto-created/deduped by name):
@@ -196,6 +233,18 @@ Deepening an entity with no new relation:
 
 ```bash
 gmem-cli entity update --uuid <uuid> --summary "..." --attributes '{"role":"lead"}'   # merges; --replace overwrites
+```
+
+Maintaining stored facts (corrections after the fact):
+
+```bash
+gmem-cli edge invalidate --uuid <uuid> [--invalid-at <t>]   # retire a fact; default: now
+gmem-cli edge delete --uuid <uuid>                          # remove a fact written by mistake
+gmem-cli edge upsert --source-uuid <u> --target-uuid <u> --name REL --fact "..." \
+  [--episode-uuid <ep>] [--attributes '{...}']
+# edge upsert is the low-level path: it skips dedup/candidate checks. Use it only
+# for what add/add-triplet cannot do (edge attributes); normal writes go through
+# add / add-triplet so duplicates are caught.
 ```
 
 Periodic consolidation:

@@ -45,40 +45,19 @@ Usage rules:
 
 ## Storing memory
 
-**Before your first write, read [references/extraction.md](references/extraction.md)
-and follow it.** It defines what to extract, how to phrase facts, temporal rules,
-dedup/invalidation, and summary style. `gmem-cli` stores what you give it verbatim —
-extraction quality is your responsibility.
-
-Flow:
-
-1. `gmem-cli schema show` — use configured types if present.
-2. Extract entities + facts from the content (per extraction.md).
-3. `gmem-cli add ...` — episode + entities + edges in one call.
-4. A new fact that contradicts a stored one: `edge invalidate` the old, then write
-   the new. Never edit a fact in place.
-
-## Commands
-
-| Command | Use |
-|---|---|
-| `init` / `status` | create indexes / check connectivity |
-| `schema show` | print configured entity & edge types |
-| `add` | episode + extracted entities + edges in one call |
-| `add-triplet` | a single fact (entities auto-deduped by name) |
-| `entity search` / `edge search` | recall; `--type`, `--as-of`, `--include-invalid`, `--limit` |
-| `episode get` / `episode list` | raw stored content |
-| `entity get` / `entity update` / `entity merge` | entity detail / deepen / dedup |
-| `edge upsert` / `edge invalidate` / `edge delete` | write / supersede / remove a fact |
-| `node delete` | delete any node + its edges |
-| `community build` / `community upsert` | candidate clusters / write community summary |
-| `saga create` / `saga get` / `saga update` | incremental summarization watermark |
+**Before any write, read [references/writing.md](references/writing.md) and
+follow it.** It defines what to extract, how to phrase facts, temporal rules, the
+write flow (preflight, dedup, invalidation), and summary style. `gmem-cli` stores
+what you give it verbatim — extraction quality is your responsibility.
 
 ## Notes
 
 - Times are RFC3339 UTC.
 - `--group-id <id>` (global flag) selects an isolated memory space; the configured
   default group applies otherwise. Run `init` once per group.
+- Edges are the memory: entities are anchors, facts live on edges. After `add`,
+  `edge_uuids` must be non-empty whenever the content contained a durable fact —
+  an empty list means nothing was remembered.
 - `add` is not transactional: a failure mid-call may leave an episode without its
   entities/edges. Retrying is safe but check `episode list` and `node delete` the
   orphan.

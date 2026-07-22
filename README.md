@@ -78,8 +78,8 @@ endpoint types; `--lenient` skips validation per command.
 |---|---|
 | `init` / `status` | create indexes / check connectivity |
 | `schema show` | print configured entity & edge types |
-| `add` | episode + extracted entities + edges in one call |
-| `add-triplet` | a single fact (entities deduped by name) |
+| `add` | episode + extracted entities + edges in one call; `--dry-run` preflight returns duplicate candidates, `duplicate_of`/`invalidate` per-edge dispositions |
+| `add-triplet` | a single fact (entities deduped by name); `--dry-run`, `--duplicate-of`, `--invalidate`, `--episode-uuid` |
 | `entity search` / `edge search` | hybrid vector+fulltext (RRF); `--method`, `--type`, `--as-of`, `--include-invalid`, `--limit` |
 | `episode get|list` | episode operations |
 | `entity get|update|merge` | entity operations |
@@ -90,5 +90,5 @@ endpoint types; `--lenient` skips validation per command.
 
 See [`skills/graph-memory/SKILL.md`](skills/graph-memory/SKILL.md) for agent-facing
 usage (recall/store workflows) and
-[`skills/graph-memory/references/extraction.md`](skills/graph-memory/references/extraction.md)
-for the extraction principles agents follow when writing to the graph.
+[`skills/graph-memory/references/writing.md`](skills/graph-memory/references/writing.md)
+for the write-side guide agents follow (extraction, dedup, maintenance).
