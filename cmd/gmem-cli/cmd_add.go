@@ -9,7 +9,7 @@ import (
 
 var (
 	addContent, addSource, addEntities, addEdges, addMetadata, addValidAt, addSaga string
-	addLenient                                                                    bool
+	addLenient, addDryRun                                                          bool
 )
 
 func init() {
@@ -21,6 +21,7 @@ func init() {
 	addCmd.Flags().StringVar(&addValidAt, "valid-at", "", "RFC3339 time of the episode")
 	addCmd.Flags().StringVar(&addSaga, "saga", "", "saga name; links the episode via HAS_EPISODE/NEXT_EPISODE")
 	addCmd.Flags().BoolVar(&addLenient, "lenient", false, "skip schema validation")
+	addCmd.Flags().BoolVar(&addDryRun, "dry-run", false, "validate + detect duplicate candidates, zero writes")
 	_ = addCmd.MarkFlagRequired("content")
 	rootCmd.AddCommand(addCmd)
 }
@@ -53,7 +54,7 @@ var addCmd = &cobra.Command{
 				fatal(err)
 			}
 		}
-		res, err := c.Add(in)
+		res, err := c.Add(in, addDryRun)
 		if err != nil {
 			fatal(err)
 		}
@@ -62,8 +63,8 @@ var addCmd = &cobra.Command{
 }
 
 var (
-	triSource, triName, triFact, triTarget, triValidAt string
-	triLenient                                        bool
+	triSource, triName, triFact, triTarget, triValidAt, triDuplicateOf, triInvalidate, triEpisodeUUID string
+	triLenient, triDryRun                                                                            bool
 )
 
 func init() {
@@ -72,7 +73,11 @@ func init() {
 	addTripletCmd.Flags().StringVar(&triFact, "fact", "", "natural language fact")
 	addTripletCmd.Flags().StringVar(&triTarget, "target", "", "target entity name")
 	addTripletCmd.Flags().StringVar(&triValidAt, "valid-at", "", "RFC3339 time")
+	addTripletCmd.Flags().StringVar(&triDuplicateOf, "duplicate-of", "", "existing edge uuid: merge episode attribution instead of creating")
+	addTripletCmd.Flags().StringVar(&triInvalidate, "invalidate", "", "comma-separated edge uuids to invalidate before writing")
+	addTripletCmd.Flags().StringVar(&triEpisodeUUID, "episode-uuid", "", "source episode uuid (attribution)")
 	addTripletCmd.Flags().BoolVar(&triLenient, "lenient", false, "skip schema validation")
+	addTripletCmd.Flags().BoolVar(&triDryRun, "dry-run", false, "detect duplicate candidates, zero writes")
 	_ = addTripletCmd.MarkFlagRequired("source")
 	_ = addTripletCmd.MarkFlagRequired("name")
 	_ = addTripletCmd.MarkFlagRequired("fact")
@@ -88,7 +93,12 @@ var addTripletCmd = &cobra.Command{
 		if err != nil {
 			fatal(err)
 		}
-		res, err := c.AddTriplet(triSource, triName, triFact, triTarget, "", triValidAt, triLenient)
+		res, err := c.AddTriplet(&gmem.TripletInput{
+			Source: triSource, Name: triName, Fact: triFact, Target: triTarget,
+			ValidAt: triValidAt, DuplicateOf: triDuplicateOf,
+			Invalidate: parseTypes(triInvalidate), EpisodeUUID: triEpisodeUUID,
+			Lenient: triLenient,
+		}, triDryRun)
 		if err != nil {
 			fatal(err)
 		}

@@ -191,3 +191,77 @@ func (c *Client) DeleteEdge(uuid string) error {
 	}
 	return nil
 }
+
+// EdgeCandidate is an existing edge with the same (source, target, name) as a
+// fact being written. Invalidated edges are included (invalid_at set) so the
+// agent sees history. The agent — not the CLI — judges DUPLICATE/CONTRADICTION.
+type EdgeCandidate struct {
+	UUID      string   `json:"uuid"`
+	Name      string   `json:"name"`
+	Fact      string   `json:"fact"`
+	ValidAt   string   `json:"valid_at,omitempty"`
+	InvalidAt string   `json:"invalid_at,omitempty"`
+	Episodes  []string `json:"episodes,omitempty"`
+}
+
+func edgeCandidate(e *Edge) EdgeCandidate {
+	return EdgeCandidate{
+		UUID: e.UUID, Name: e.Name, Fact: e.Fact,
+		ValidAt: e.ValidAt, InvalidAt: e.InvalidAt, Episodes: e.Episodes,
+	}
+}
+
+// FindEdgeCandidates returns all edges (valid and invalidated) with the same
+// (source_uuid, target_uuid, name). Read-only; endpoint uuids are group-scoped
+// (each group is its own FalkorDB graph), so no group filter is needed.
+func (c *Client) FindEdgeCandidates(sourceUUID, targetUUID, name string) ([]*Edge, error) {
+	res, err := c.graph.ROQuery(`MATCH (s:Entity {uuid: $s})-[r:RELATES_TO {name: $name}]->(t:Entity {uuid: $t})
+		RETURN r, s.uuid AS suuid, t.uuid AS tuuid ORDER BY r.created_at`,
+		map[string]any{"s": sourceUUID, "t": targetUUID, "name": name}, nil)
+	if err != nil {
+		return nil, err
+	}
+	out := []*Edge{}
+	for res.Next() {
+		rVal, err := res.Record().GetByIndex(0)
+		if err != nil {
+			continue
+		}
+		r, ok := rVal.(*falkordb.Edge)
+		if !ok {
+			continue
+		}
+		e := edgeFromRel(r)
+		su, _ := res.Record().GetByIndex(1)
+		tu, _ := res.Record().GetByIndex(2)
+		if s, ok := su.(string); ok {
+			e.SourceUUID = s
+		}
+		if t, ok := tu.(string); ok {
+			e.TargetUUID = t
+		}
+		out = append(out, e)
+	}
+	return out, nil
+}
+
+// MergeEdgeEpisode appends episodeUUID to an edge's episodes array (attribution
+// merge). No-op if episodeUUID is empty or already present. Does not touch fact,
+// embedding, or any other property.
+func (c *Client) MergeEdgeEpisode(uuid, episodeUUID string) (*Edge, error) {
+	if _, err := c.GetEdge(uuid); err != nil {
+		return nil, err
+	}
+	if episodeUUID != "" {
+		_, err := c.graph.Query(`MATCH ()-[r:RELATES_TO {uuid: $uuid}]->()
+			SET r.episodes = CASE
+				WHEN r.episodes IS NULL THEN [$ep]
+				WHEN $ep IN r.episodes THEN r.episodes
+				ELSE r.episodes + $ep END`,
+			map[string]any{"uuid": uuid, "ep": episodeUUID}, nil)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return c.GetEdge(uuid)
+}

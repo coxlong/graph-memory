@@ -20,7 +20,7 @@ func TestAddFullFlow(t *testing.T) {
 		Edges: []AddEdgeInput{
 			{Source: "AddAlice", Target: "TeamB", Name: "MEMBER_OF", Fact: "AddAlice joined TeamB", ValidAt: "2026-07-19T00:00:00Z"},
 		},
-	})
+	}, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -55,12 +55,12 @@ func TestAddIdempotentRetry(t *testing.T) {
 		Episode:  &Episode{Content: "retry test", Source: "text"},
 		Entities: []AddEntityInput{{Name: "RetryAlice"}},
 	}
-	r1, err := c.Add(in)
+	r1, err := c.Add(in, false)
 	if err != nil {
 		t.Fatal(err)
 	}
 	// second add with same entity name should dedup (no error, same uuid)
-	r2, err := c.Add(in)
+	r2, err := c.Add(in, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -74,7 +74,7 @@ func TestAddTriplet(t *testing.T) {
 	defer srv.Close()
 	c := newTestClient(t, srv.URL)
 
-	r, err := c.AddTriplet("TriAlice", "WORKS_ON", "TriAlice works on gmem", "gmem", "", "", false)
+	r, err := c.AddTriplet(&TripletInput{Source: "TriAlice", Name: "WORKS_ON", Fact: "TriAlice works on gmem", Target: "gmem"}, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -82,7 +82,7 @@ func TestAddTriplet(t *testing.T) {
 		t.Fatalf("bad result: %+v", r)
 	}
 	// repeat: entities dedup, edge uuid changes (new edge each call)
-	r2, err := c.AddTriplet("TriAlice", "WORKS_ON", "TriAlice works on gmem", "gmem", "", "", false)
+	r2, err := c.AddTriplet(&TripletInput{Source: "TriAlice", Name: "WORKS_ON", Fact: "TriAlice works on gmem", Target: "gmem"}, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -124,7 +124,7 @@ func TestAddPreflightAbortsBeforeWrites(t *testing.T) {
 		}},
 	}
 	for _, tc := range cases {
-		if _, err := c.Add(tc.in); err == nil {
+		if _, err := c.Add(tc.in, false); err == nil {
 			t.Errorf("%s: want error, got nil", tc.name)
 		}
 	}
@@ -171,7 +171,7 @@ func TestAddPreflightEdgeSchema(t *testing.T) {
 			{Name: "Bob", Labels: []string{"Person"}},
 		},
 		Edges: []AddEdgeInput{{Source: "Shanghai", Target: "Bob", Name: "LIVES_IN", Fact: "bad direction"}},
-	})
+	}, false)
 	if err == nil {
 		t.Fatal("want schema error, got nil")
 	}
@@ -195,7 +195,7 @@ func TestAddSagaLinkage(t *testing.T) {
 	r1, err := c.Add(&AddInput{
 		Episode: &Episode{Content: "ep1", Source: "text", ValidAt: "2026-07-01T00:00:00Z"},
 		Saga:    "proj-x",
-	})
+	}, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -203,7 +203,7 @@ func TestAddSagaLinkage(t *testing.T) {
 	r2, err := c.Add(&AddInput{
 		Episode: &Episode{Content: "ep2", Source: "text", ValidAt: "2026-07-02T00:00:00Z"},
 		Saga:    "proj-x",
-	})
+	}, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -226,6 +226,173 @@ func TestAddSagaLinkage(t *testing.T) {
 	nextEp := countEdges(t, c, `MATCH (:Episodic)-[r:NEXT_EPISODE]->(:Episodic) RETURN count(r)`, "")
 	if nextEp != 1 {
 		t.Fatalf("NEXT_EPISODE count: %d", nextEp)
+	}
+}
+
+// TestAddDryRunNoWrites: dry-run returns candidates but writes nothing.
+func TestAddDryRunNoWrites(t *testing.T) {
+	srv := newFakeEmbedServer(t)
+	defer srv.Close()
+	c := newTestClient(t, srv.URL)
+
+	// seed one edge via a real add
+	_, err := c.Add(&AddInput{
+		Episode:  &Episode{Content: "seed", Source: "text"},
+		Entities: []AddEntityInput{{Name: "DryA"}, {Name: "DryB"}},
+		Edges:    []AddEdgeInput{{Source: "DryA", Target: "DryB", Name: "KNOWS", Fact: "DryA knows DryB"}},
+	}, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	nodeCnt := countEdges(t, c, `MATCH (n) RETURN count(n)`, "")
+
+	// dry-run the same add: candidates must include the seeded edge, zero new writes
+	dr, err := c.Add(&AddInput{
+		Episode:  &Episode{Content: "dup", Source: "text"},
+		Entities: []AddEntityInput{{Name: "DryA"}, {Name: "DryB"}},
+		Edges:    []AddEdgeInput{{Source: "DryA", Target: "DryB", Name: "KNOWS", Fact: "DryA knows DryB"}},
+	}, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if dr.EpisodeUUID != "" || len(dr.EdgeUUIDs) != 0 {
+		t.Fatalf("dry-run should not write: %+v", dr)
+	}
+	if len(dr.Edges) != 1 || len(dr.Edges[0].Candidates) != 1 {
+		t.Fatalf("want 1 candidate, got %+v", dr.Edges)
+	}
+	if n := countEdges(t, c, `MATCH (n) RETURN count(n)`, ""); n != nodeCnt {
+		t.Fatalf("dry-run wrote nodes: %d -> %d", nodeCnt, n)
+	}
+}
+
+// TestAddDuplicateOfMerges: duplicate_of merges episode attribution, no new edge.
+func TestAddDuplicateOfMerges(t *testing.T) {
+	srv := newFakeEmbedServer(t)
+	defer srv.Close()
+	c := newTestClient(t, srv.URL)
+
+	r1, err := c.Add(&AddInput{
+		Episode:  &Episode{Content: "first", Source: "text"},
+		Entities: []AddEntityInput{{Name: "DupA"}, {Name: "DupB"}},
+		Edges:    []AddEdgeInput{{Source: "DupA", Target: "DupB", Name: "KNOWS", Fact: "DupA knows DupB"}},
+	}, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	edgeUUID := r1.EdgeUUIDs[0]
+
+	r2, err := c.Add(&AddInput{
+		Episode:  &Episode{Content: "second", Source: "text"},
+		Entities: []AddEntityInput{{Name: "DupA"}, {Name: "DupB"}},
+		Edges: []AddEdgeInput{{Source: "DupA", Target: "DupB", Name: "KNOWS", Fact: "DupA knows DupB",
+			DuplicateOf: edgeUUID}},
+	}, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !r2.Edges[0].Merged || r2.Edges[0].EdgeUUID != edgeUUID {
+		t.Fatalf("want merged into %s, got %+v", edgeUUID, r2.Edges[0])
+	}
+	// still exactly one RELATES_TO edge, with both episodes
+	if n := countEdges(t, c, `MATCH ()-[r:RELATES_TO]->() RETURN count(r)`, ""); n != 1 {
+		t.Fatalf("want 1 edge, got %d", n)
+	}
+	e, _ := c.GetEdge(edgeUUID)
+	if len(e.Episodes) != 2 {
+		t.Fatalf("want 2 episodes, got %v", e.Episodes)
+	}
+	// writeback: episode 2's entity_edges contains the merged edge uuid
+	ep2, _ := c.GetEpisode(r2.EpisodeUUID)
+	if len(ep2.EntityEdges) != 1 || ep2.EntityEdges[0] != edgeUUID {
+		t.Fatalf("ep2 entity_edges: %v", ep2.EntityEdges)
+	}
+}
+
+// TestAddInvalidateThenWrite: invalidate + new edge in one add.
+func TestAddInvalidateThenWrite(t *testing.T) {
+	srv := newFakeEmbedServer(t)
+	defer srv.Close()
+	c := newTestClient(t, srv.URL)
+
+	r1, err := c.Add(&AddInput{
+		Episode:  &Episode{Content: "old fact", Source: "text"},
+		Entities: []AddEntityInput{{Name: "InvA"}, {Name: "InvB"}},
+		Edges:    []AddEdgeInput{{Source: "InvA", Target: "InvB", Name: "WORKS_AT", Fact: "InvA works at InvB as junior"}},
+	}, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	oldUUID := r1.EdgeUUIDs[0]
+
+	r2, err := c.Add(&AddInput{
+		Episode:  &Episode{Content: "new fact", Source: "text"},
+		Entities: []AddEntityInput{{Name: "InvA"}, {Name: "InvB"}},
+		Edges: []AddEdgeInput{{Source: "InvA", Target: "InvB", Name: "WORKS_AT", Fact: "InvA works at InvB as senior",
+			Invalidate: []string{oldUUID}}},
+	}, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// old edge invalidated
+	old, _ := c.GetEdge(oldUUID)
+	if old.InvalidAt == "" {
+		t.Fatal("old edge not invalidated")
+	}
+	// new edge valid, two edges total
+	if n := countEdges(t, c, `MATCH ()-[r:RELATES_TO]->() RETURN count(r)`, ""); n != 2 {
+		t.Fatalf("want 2 edges, got %d", n)
+	}
+	if r2.Edges[0].EdgeUUID == oldUUID {
+		t.Fatal("new edge reuses old uuid")
+	}
+}
+
+// TestAddTripletDryRun: dry-run returns candidates, zero writes.
+func TestAddTripletDryRun(t *testing.T) {
+	srv := newFakeEmbedServer(t)
+	defer srv.Close()
+	c := newTestClient(t, srv.URL)
+
+	if _, err := c.AddTriplet(&TripletInput{Source: "TriDryA", Name: "KNOWS", Fact: "TriDryA knows TriDryB", Target: "TriDryB"}, false); err != nil {
+		t.Fatal(err)
+	}
+	dr, err := c.AddTriplet(&TripletInput{Source: "TriDryA", Name: "KNOWS", Fact: "TriDryA knows TriDryB", Target: "TriDryB"}, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(dr.Candidates) != 1 {
+		t.Fatalf("want 1 candidate, got %+v", dr.Candidates)
+	}
+	if dr.EdgeUUID != "" {
+		t.Fatal("dry-run should not write")
+	}
+}
+
+// TestAddTripletDuplicateOf: merge via add-triplet.
+func TestAddTripletDuplicateOf(t *testing.T) {
+	srv := newFakeEmbedServer(t)
+	defer srv.Close()
+	c := newTestClient(t, srv.URL)
+
+	r1, err := c.AddTriplet(&TripletInput{Source: "TriDupA", Name: "KNOWS", Fact: "TriDupA knows TriDupB", Target: "TriDupB"}, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r2, err := c.AddTriplet(&TripletInput{Source: "TriDupA", Name: "KNOWS", Fact: "TriDupA knows TriDupB", Target: "TriDupB",
+		DuplicateOf: r1.EdgeUUID, EpisodeUUID: "some-episode"}, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !r2.Merged || r2.EdgeUUID != r1.EdgeUUID {
+		t.Fatalf("want merged, got %+v", r2)
+	}
+	if n := countEdges(t, c, `MATCH ()-[r:RELATES_TO]->() RETURN count(r)`, ""); n != 1 {
+		t.Fatalf("want 1 edge, got %d", n)
+	}
+	e, _ := c.GetEdge(r1.EdgeUUID)
+	if len(e.Episodes) != 1 || e.Episodes[0] != "some-episode" {
+		t.Fatalf("episodes: %v", e.Episodes)
 	}
 }
 

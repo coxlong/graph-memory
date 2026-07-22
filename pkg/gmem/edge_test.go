@@ -125,3 +125,71 @@ func TestUpsertEdgeExpiredAt(t *testing.T) {
 		t.Fatalf("includeInvalid should find expired edge: %v", res)
 	}
 }
+
+func TestFindEdgeCandidates(t *testing.T) {
+	srv := newFakeEmbedServer(t)
+	defer srv.Close()
+	c := newTestClient(t, srv.URL)
+	a, _, _ := c.UpsertEntity(&Entity{Name: "CandA"}, false)
+	b, _, _ := c.UpsertEntity(&Entity{Name: "CandB"}, false)
+	// two edges same (src,tgt,name) + one different-name edge
+	c.UpsertEdge(&Edge{Name: "KNOWS", Fact: "CandA knows CandB v1", SourceUUID: a.UUID, TargetUUID: b.UUID}, false)
+	c.UpsertEdge(&Edge{Name: "KNOWS", Fact: "CandA knows CandB v2", SourceUUID: a.UUID, TargetUUID: b.UUID}, false)
+	c.UpsertEdge(&Edge{Name: "WORKS_WITH", Fact: "different", SourceUUID: a.UUID, TargetUUID: b.UUID}, false)
+
+	cands, err := c.FindEdgeCandidates(a.UUID, b.UUID, "KNOWS")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cands) != 2 {
+		t.Fatalf("want 2 candidates, got %d", len(cands))
+	}
+	// invalidate one; candidates still include it with InvalidAt set
+	c.InvalidateEdge(cands[0].UUID, "2026-07-19T12:00:00Z")
+	cands2, _ := c.FindEdgeCandidates(a.UUID, b.UUID, "KNOWS")
+	if len(cands2) != 2 {
+		t.Fatalf("want 2 candidates after invalidate, got %d", len(cands2))
+	}
+	for _, e := range cands2 {
+		if e.UUID == cands[0].UUID && e.InvalidAt == "" {
+			t.Fatalf("invalidated candidate missing InvalidAt: %+v", e)
+		}
+	}
+}
+
+func TestMergeEdgeEpisode(t *testing.T) {
+	srv := newFakeEmbedServer(t)
+	defer srv.Close()
+	c := newTestClient(t, srv.URL)
+	a, _, _ := c.UpsertEntity(&Entity{Name: "MrgA"}, false)
+	b, _, _ := c.UpsertEntity(&Entity{Name: "MrgB"}, false)
+	e, _ := c.UpsertEdge(&Edge{Name: "KNOWS", Fact: "MrgA knows MrgB", SourceUUID: a.UUID, TargetUUID: b.UUID}, false)
+
+	// append episode
+	merged, err := c.MergeEdgeEpisode(e.UUID, "ep1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(merged.Episodes) != 1 || merged.Episodes[0] != "ep1" {
+		t.Fatalf("episodes: %v", merged.Episodes)
+	}
+	// idempotent: same episode twice
+	merged2, _ := c.MergeEdgeEpisode(e.UUID, "ep1")
+	if len(merged2.Episodes) != 1 {
+		t.Fatalf("want 1 episode after dup, got %v", merged2.Episodes)
+	}
+	// second episode appends
+	merged3, _ := c.MergeEdgeEpisode(e.UUID, "ep2")
+	if len(merged3.Episodes) != 2 {
+		t.Fatalf("want 2 episodes, got %v", merged3.Episodes)
+	}
+	// empty episode is a no-op
+	merged4, _ := c.MergeEdgeEpisode(e.UUID, "")
+	if len(merged4.Episodes) != 2 {
+		t.Fatalf("empty episode should not change count: %v", merged4.Episodes)
+	}
+	// unknown uuid errors
+	if _, err := c.MergeEdgeEpisode("nonexistent", "ep"); err == nil {
+		t.Fatal("want error for unknown uuid")
+	}
+}
